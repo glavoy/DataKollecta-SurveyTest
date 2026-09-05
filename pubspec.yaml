@@ -45,6 +45,11 @@ dependencies:
   sqflite_common_ffi: ^2.3.2
   archive: ^3.6.1
 
+  # Used directly by the app and its tests, and already transitive through
+  # datakollecta -- declared so a change over there cannot silently remove them.
+  shared_preferences: ^2.3.2
+  package_info_plus: ^8.0.0
+
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8

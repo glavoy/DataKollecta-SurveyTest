@@ -15,8 +15,12 @@ import 'package:surveytest/sandbox.dart';
 File? findPackage() {
   for (final candidate in [
     '/Users/glavoy/temp/prism_css_test_2026_08_23.zip',
-    p.join(Directory.current.parent.path, 'DataKollecta', 'zips',
-        'avert_ug_test_2026_08_11.zip'),
+    p.join(
+      Directory.current.parent.path,
+      'DataKollecta',
+      'zips',
+      'avert_ug_test_2026_08_11.zip',
+    ),
   ]) {
     final file = File(candidate);
     if (file.existsSync()) return file;
@@ -60,21 +64,30 @@ void main() {
     // Extracted by surveyId, not by the zip's filename -- which is what keeps
     // DbService able to find the XML.
     expect(p.basename(installed.surveyDir.path), installed.surveyId);
-    expect(File(p.join(installed.surveyDir.path, 'survey_manifest.gistx'))
-        .existsSync(), isTrue);
+    expect(
+      File(
+        p.join(installed.surveyDir.path, 'survey_manifest.gistx'),
+      ).existsSync(),
+      isTrue,
+    );
 
     // Every form the manifest declares became a real table with real columns.
     final db = await DbService.getDatabaseForQueries(installed.surveyId);
-    final tables = (await db.query('sqlite_master',
-            columns: ['name'], where: 'type = ?', whereArgs: ['table']))
-        .map((r) => r['name'] as String)
-        .toSet();
+    final tables = (await db.query(
+      'sqlite_master',
+      columns: ['name'],
+      where: 'type = ?',
+      whereArgs: ['table'],
+    )).map((r) => r['name'] as String).toSet();
 
     expect(tables, contains('crfs'));
     expect(tables, contains('formchanges'));
     for (final xml in installed.xmlFiles) {
-      expect(tables, contains(p.basenameWithoutExtension(xml).toLowerCase()),
-          reason: '$xml produced no table');
+      expect(
+        tables,
+        contains(p.basenameWithoutExtension(xml).toLowerCase()),
+        reason: '$xml produced no table',
+      );
     }
 
     // The crfs table is populated, not merely created.
@@ -92,8 +105,13 @@ void main() {
 
     expect(
       () => const PackageInstaller().install(notAPackage),
-      throwsA(isA<InstallException>().having(
-          (e) => e.message, 'message', contains('survey_manifest.gistx'))),
+      throwsA(
+        isA<InstallException>().having(
+          (e) => e.message,
+          'message',
+          contains('survey_manifest.gistx'),
+        ),
+      ),
     );
   });
 
@@ -107,12 +125,17 @@ void main() {
     final first = await const PackageInstaller().install(zip);
     // A record that must not survive a fresh install.
     final db = await DbService.getDatabaseForQueries(first.surveyId);
-    final table = p.basenameWithoutExtension(first.xmlFiles.first).toLowerCase();
+    final table = p
+        .basenameWithoutExtension(first.xmlFiles.first)
+        .toLowerCase();
     await db.insert(table, {'uniqueid': 'left-over'});
 
     final second = await const PackageInstaller().install(zip);
     final reopened = await DbService.getDatabaseForQueries(second.surveyId);
-    expect((await reopened.query(table)).length, 0,
-        reason: 'the second install reused the first run\'s database');
+    expect(
+      (await reopened.query(table)).length,
+      0,
+      reason: 'the second install reused the first run\'s database',
+    );
   });
 }

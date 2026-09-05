@@ -1,0 +1,329 @@
+import 'dart:math';
+
+import 'package:datakollecta/models/question.dart';
+
+/// How a simulated interviewer chooses answers.
+enum RespondentStrategy {
+  /// Uniform over whatever is legal. The workhorse.
+  random,
+
+  /// Always the first option, the lowest number, the earliest date. Produces
+  /// the same route every time, which makes it the one to reach for when
+  /// reproducing a report by hand.
+  firstOption,
+
+  /// Range ends and the values either side of them. Where off-by-one lives.
+  boundaryValues,
+
+  /// Prefers the answer that makes a skip fire, so branches get taken rather
+  /// than merely existing.
+  skipMaximising,
+
+  /// Prefers the answer that makes no skip fire, walking the long way through
+  /// the form.
+  skipAvoiding,
+
+  /// Answers "don't know" or "refuse" wherever the question offers it. These
+  /// are stored as codes outside the response list and bypass the range check,
+  /// so they reach code ordinary answers do not.
+  dontKnowHeavy,
+}
+
+/// One decision, kept so a failing run can be read back.
+class Decision {
+  const Decision(this.fieldName, this.value, this.note);
+  final String fieldName;
+  final Object? value;
+  final String note;
+
+  @override
+  String toString() => '$fieldName = ${value ?? '(blank)'}  [$note]';
+}
+
+/// Chooses answers the way an interviewer's fingers would leave them.
+///
+/// The values here have to match what the **widget layer** stores, not what
+/// would be tidy. A date question holds a `DateTime` because that is what the
+/// picker writes; a checkbox holds a `List<String>`; a fixed-length numeric is
+/// zero-padded because `QuestionView` pads it on seed. Getting any of those
+/// wrong makes every "the answer that was given is the answer that was stored"
+/// check fail for a reason that is about the simulator, not the survey.
+class VirtualRespondent {
+  VirtualRespondent({
+    required int seed,
+    this.strategy = RespondentStrategy.random,
+    this.optionalBlankRate = 0.2,
+    this.specialResponseRate = 0.05,
+    this.backtrackRate = 0.0,
+  }) : _random = Random(seed),
+       _seed = seed;
+
+  final Random _random;
+  final int _seed;
+  final RespondentStrategy strategy;
+
+  /// How often a question the dictionary marked optional is left blank. The
+  /// one legitimate way a displayed question ends up NULL.
+  final double optionalBlankRate;
+
+  /// How often "don't know"/"refuse" is chosen where offered, outside
+  /// [RespondentStrategy.dontKnowHeavy].
+  final double specialResponseRate;
+
+  /// How often the interviewer goes back a question before carrying on. Going
+  /// back and forward again is how a record's answers get recomputed, and is
+  /// the only way to reach some of what the engine does.
+  final double backtrackRate;
+
+  final List<Decision> decisions = [];
+
+  int get seed => _seed;
+
+  bool roll(double probability) => _random.nextDouble() < probability;
+
+  /// Whether to step back a question rather than forward.
+  bool shouldBacktrack(int historyDepth) =>
+      historyDepth > 0 && roll(backtrackRate);
+
+  /// The value to store for [question], or null to leave it blank.
+  ///
+  /// [options] are the resolved choices -- static ones come off the question,
+  /// CSV- and database-backed ones are looked up first, so this never has to
+  /// know where they came from.
+  /// [rulesTestingThis] are every skip rule anywhere in the form that reads
+  /// this field. The skip strategies need them because most real branching is
+  /// not a postskip on the question being answered: it is a **preskip on a
+  /// later question** testing this one -- `preskip: if enrolled = 1, skip to
+  /// swater`. Without them the strategies could steer only the small minority
+  /// of rules attached to their own question, and skip-maximising and
+  /// skip-avoiding produced identical routes on a real dictionary.
+  Object? answerFor(
+    Question question, {
+    required List<QuestionOption> options,
+    List<SkipCondition> rulesTestingThis = const [],
+  }) {
+    final value = _choose(question, options, rulesTestingThis);
+    decisions.add(Decision(question.fieldName, value, strategy.name));
+    return value;
+  }
+
+  Object? _choose(
+    Question question,
+    List<QuestionOption> options,
+    List<SkipCondition> rulesTestingThis,
+  ) {
+    if (question.optional && roll(optionalBlankRate)) return null;
+
+    final special = _specialResponse(question);
+    if (special != null) return special;
+
+    switch (question.type) {
+      case QuestionType.radio:
+      case QuestionType.combobox:
+        return _pickOption(question, options, rulesTestingThis);
+
+      case QuestionType.checkbox:
+        return _pickSubset(options);
+
+      case QuestionType.date:
+      case QuestionType.datetime:
+        return _pickDate(question);
+
+      case QuestionType.text:
+        return _pickText(question);
+
+      // Neither stores anything: information displays copy, automatic is
+      // computed by the engine when navigation reaches it.
+      case QuestionType.information:
+      case QuestionType.automatic:
+        return null;
+    }
+  }
+
+  /// "Don't know" and "Refuse" are stored as their own codes, which are not in
+  /// the Responses list and are exempt from the range check. Worth reaching
+  /// deliberately rather than by luck.
+  String? _specialResponse(Question question) {
+    final codes = [
+      if (question.dontKnow != null && question.dontKnow!.isNotEmpty)
+        question.dontKnow!,
+      if (question.refuse != null && question.refuse!.isNotEmpty)
+        question.refuse!,
+    ];
+    if (codes.isEmpty) return null;
+
+    final rate = strategy == RespondentStrategy.dontKnowHeavy
+        ? 0.6
+        : specialResponseRate;
+    return roll(rate) ? codes[_random.nextInt(codes.length)] : null;
+  }
+
+  String? _pickOption(
+    Question question,
+    List<QuestionOption> options,
+    List<SkipCondition> rulesTestingThis,
+  ) {
+    if (options.isEmpty) return null;
+
+    switch (strategy) {
+      case RespondentStrategy.firstOption:
+        return options.first.value;
+      case RespondentStrategy.boundaryValues:
+        return roll(0.5) ? options.first.value : options.last.value;
+      case RespondentStrategy.skipMaximising:
+      case RespondentStrategy.skipAvoiding:
+        return _optionBySkipPreference(options, rulesTestingThis);
+      case RespondentStrategy.random:
+      case RespondentStrategy.dontKnowHeavy:
+        return options[_random.nextInt(options.length)].value;
+    }
+  }
+
+  /// Picks the option that does (or does not) make some rule reading this
+  /// field fire.
+  ///
+  /// Cheap because skip evaluation is a pure comparison: each candidate is
+  /// tested against the rule directly rather than by running the engine.
+  String _optionBySkipPreference(
+    List<QuestionOption> options,
+    List<SkipCondition> rulesTestingThis,
+  ) {
+    final rules = rulesTestingThis
+        .where((s) => s.responseType != 'dynamic')
+        .toList();
+    if (rules.isEmpty) return options[_random.nextInt(options.length)].value;
+
+    final wanted = strategy == RespondentStrategy.skipMaximising;
+    final matching = options
+        .where((o) => rules.any((r) => _wouldFire(r, o.value)) == wanted)
+        .toList();
+    if (matching.isEmpty) return options[_random.nextInt(options.length)].value;
+    return matching[_random.nextInt(matching.length)].value;
+  }
+
+  bool _wouldFire(SkipCondition rule, String candidate) {
+    final expected = rule.response;
+    final left = num.tryParse(candidate);
+    final right = num.tryParse(expected);
+    final numeric = left != null && right != null;
+
+    switch (rule.condition) {
+      case '=':
+        return numeric ? left == right : candidate == expected;
+      case '<>':
+      case '!=':
+        return numeric ? left != right : candidate != expected;
+      case '>':
+        return numeric && left > right;
+      case '>=':
+        return numeric && left >= right;
+      case '<':
+        return numeric && left < right;
+      case '<=':
+        return numeric && left <= right;
+      default:
+        return false;
+    }
+  }
+
+  /// A checkbox stores a list. "Don't know"/"Refuse"/"Not in this list" are
+  /// mutually exclusive with real choices, which is how the widget behaves.
+  List<String>? _pickSubset(List<QuestionOption> options) {
+    if (options.isEmpty) return null;
+    if (strategy == RespondentStrategy.firstOption) {
+      return [options.first.value];
+    }
+    final picked = options.where((_) => roll(0.4)).map((o) => o.value).toList();
+    if (picked.isEmpty) {
+      return [options[_random.nextInt(options.length)].value];
+    }
+    return picked;
+  }
+
+  /// A `DateTime`, because that is what the picker writes into the map.
+  DateTime? _pickDate(Question question) {
+    final min =
+        question.minDate ??
+        DateTime.now().subtract(const Duration(days: 36500));
+    final max = question.maxDate ?? DateTime.now();
+    if (max.isBefore(min)) return min;
+
+    switch (strategy) {
+      case RespondentStrategy.firstOption:
+        return min;
+      case RespondentStrategy.boundaryValues:
+        return roll(0.5) ? min : max;
+      default:
+        final span = max.difference(min).inDays;
+        return span <= 0 ? min : min.add(Duration(days: _random.nextInt(span)));
+    }
+  }
+
+  String? _pickText(Question question) {
+    final check = question.numericCheck;
+    final isNumeric =
+        question.fieldType == 'text_integer' ||
+        question.fieldType == 'text_decimal' ||
+        check != null;
+
+    if (!isNumeric) return _pickFreeText(question);
+
+    final min = (check?.minValue ?? 0).toInt();
+    final max = (check?.maxValue ?? (min + 100)).toInt();
+    final value = _pickNumberIn(min, max);
+
+    if (question.fieldType == 'text_decimal') {
+      // Never a trailing '.', which is the half-typed state the app blocks --
+      // reachable deliberately in a targeted test, never by accident here.
+      return '$value.${_random.nextInt(10)}';
+    }
+    return _pad(question, '$value');
+  }
+
+  int _pickNumberIn(int min, int max) {
+    if (max < min) return min;
+    switch (strategy) {
+      case RespondentStrategy.firstOption:
+        return min;
+      case RespondentStrategy.boundaryValues:
+        final candidates = <int>{
+          min,
+          min + 1,
+          (min + max) ~/ 2,
+          max - 1,
+          max,
+        }.where((v) => v >= min && v <= max).toList();
+        return candidates[_random.nextInt(candidates.length)];
+      default:
+        return min + _random.nextInt(max - min + 1);
+    }
+  }
+
+  String _pickFreeText(Question question) {
+    const words = [
+      'Kampala',
+      'Mukono',
+      'Nabweru',
+      'Kira',
+      'Bweyogerere',
+      'not stated',
+      'other',
+      'none',
+      'n/a',
+    ];
+    var text = words[_random.nextInt(words.length)];
+    final max = question.maxCharacters;
+    if (max != null && text.length > max) text = text.substring(0, max);
+    return _pad(question, text);
+  }
+
+  /// Mirrors `QuestionView._normalizeValue`: a fixed-length numeric answer is
+  /// left-padded with zeros to its declared width, and the padded form is what
+  /// reaches the database.
+  String _pad(Question question, String value) {
+    final max = question.maxCharacters;
+    if (!question.fixedLength || max == null) return value;
+    if (int.tryParse(value) == null) return value;
+    return value.padLeft(max, '0');
+  }
+}
