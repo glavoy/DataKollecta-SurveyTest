@@ -83,10 +83,15 @@ class ScenarioRunner {
     required this.respondent,
     this.childrenToComplete,
     this.acceptCountUpdate = true,
+    this.onSkipEvaluated,
   });
 
   final String surveyId;
   final VirtualRespondent respondent;
+
+  /// Passed to every `FormRunner` this scenario creates, so skip coverage
+  /// spans the parent and its children rather than the parent alone.
+  final void Function(String ruleId, bool fired)? onSkipEvaluated;
 
   /// How many children to actually complete, per child table. Absent means
   /// "as many as the parent asked for". This is what lets a caller produce the
@@ -103,6 +108,7 @@ class ScenarioRunner {
       surveyId: surveyId,
       tableName: parentTable,
       respondent: respondent,
+      onSkipEvaluated: onSkipEvaluated,
     ).run();
 
     final children = <FormRun>[];
@@ -148,6 +154,7 @@ class ScenarioRunner {
                 surveyId: surveyId,
                 tableName: plan.childTableName,
                 respondent: respondent,
+                onSkipEvaluated: onSkipEvaluated,
               ).run(
                 prepopulatedAnswers: {
                   plan.linkingField: plan.linkingValue,

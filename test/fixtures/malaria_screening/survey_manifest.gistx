@@ -1,0 +1,18 @@
+{
+  "surveyName": "PIUS 2026-09-05",
+  "surveyId": "pius_2026-09-05",
+  "databaseName": "pius_2026-09-05.sqlite",
+  "xmlFiles": [
+    "malaria_screening.xml"
+  ],
+  "crfs": [
+    {
+      "display_order": 10,
+      "tablename": "malaria_screening",
+      "displayname": "Malaria Screening",
+      "isbase": 1,
+      "primarykey": "participant_id",
+      "display_fields": "participant_id,facility"
+    }
+  ]
+}

@@ -1,4 +1,9 @@
+import 'dart:io';
+
+import 'package:datakollecta/models/question.dart';
 import 'package:datakollecta/services/db_service.dart';
+import 'package:datakollecta/services/survey_config_service.dart';
+import 'package:datakollecta/services/survey_loader.dart';
 
 import '../installer.dart';
 import 'invariants.dart';
@@ -53,6 +58,14 @@ class SimulationSession {
     final builder = ReportBuilder();
     final invariants = Invariants(package.surveyId);
 
+    // Teach the report what the package contains before running anything.
+    // Coverage is the difference between what a package declares and what the
+    // interviews did; without this half the report can say how many questions
+    // were reached but not which were missed, which is precisely the shape of
+    // defect -- a skip pattern that closes every route to a block of
+    // questions -- that a simulator is best placed to find.
+    await _declareForms(builder);
+
     for (var i = 0; i < settings.runs; i++) {
       final seed = ReportBuilder.seedFor(base, i);
       final strategy = settings.strategies[i % settings.strategies.length];
@@ -64,6 +77,7 @@ class SimulationSession {
           strategy: strategy,
           backtrackRate: settings.backtrackRate,
         ),
+        onSkipEvaluated: builder.observeSkip,
       ).run(startTable);
 
       builder.observe(scenario, seed: seed);
@@ -75,6 +89,38 @@ class SimulationSession {
     }
 
     return builder.build();
+  }
+
+  /// Loads every form's questions once and hands them to the report.
+  ///
+  /// A form whose XML is missing is left undeclared rather than throwing --
+  /// the installer already refuses a package it cannot read, and a run that
+  /// reports slightly less is better than one that reports nothing.
+  Future<void> _declareForms(ReportBuilder builder) async {
+    final drivable = {
+      startTable,
+      for (final child in package.repeatingChildren)
+        child['tablename']?.toString() ?? '',
+    };
+
+    for (final crf in package.crfs) {
+      final table = crf['tablename']?.toString();
+      if (table == null || table.isEmpty) continue;
+
+      final path = await SurveyConfigService().getQuestionnaireAssetPath(
+        '$table.xml',
+      );
+      if (path == null) continue;
+
+      final List<Question> questions = await SurveyLoader.loadFromFile(
+        File(path),
+      );
+      builder.declareForm(
+        table,
+        questions,
+        reachable: drivable.contains(table),
+      );
+    }
   }
 
   /// How many records the package holds now, per table. Shown after a run so

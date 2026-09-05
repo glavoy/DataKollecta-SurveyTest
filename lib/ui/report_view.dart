@@ -14,6 +14,7 @@ class ReportView extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final groups = report.groupedFindings;
 
     return Card(
       child: Padding(
@@ -31,7 +32,8 @@ class ReportView extends StatelessWidget {
                 Text(
                   report.clean
                       ? 'No problems found'
-                      : '${report.findings.length} problem(s) found',
+                      : '${groups.length} problem(s) found '
+                            '(${report.findings.length} occurrence(s))',
                   style: theme.textTheme.titleMedium,
                 ),
               ],
@@ -43,15 +45,14 @@ class ReportView extends StatelessWidget {
               style: theme.textTheme.bodySmall,
             ),
 
-            if (report.findings.isNotEmpty) ...[
+            if (groups.isNotEmpty) ...[
               const SizedBox(height: 16),
-              for (final finding in report.findings.take(50))
-                _FindingTile(finding: finding),
-              if (report.findings.length > 50)
+              for (final group in groups.take(50)) _FindingTile(group: group),
+              if (groups.length > 50)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(
-                    '… and ${report.findings.length - 50} more',
+                    '… and ${groups.length - 50} more',
                     style: theme.textTheme.bodySmall,
                   ),
                 ),
@@ -70,10 +71,20 @@ class ReportView extends StatelessWidget {
               spacing: 24,
               runSpacing: 10,
               children: [
-                _Stat('Questions reached', '${report.questionsSeen.length}'),
+                _Stat(
+                  'Questions reached',
+                  '${report.questionsSeen.length} '
+                      'of ${report.questionsDeclared.length}',
+                ),
+                _Stat('Never reached', '${report.neverReached.length}'),
                 _Stat(
                   'Reached but never answered',
                   '${report.neverAnswered.length}',
+                ),
+                _Stat(
+                  'Skips exercised both ways',
+                  '${report.skipsFired.intersection(report.skipsNotFired).length} '
+                      'of ${report.skipsDeclared.length}',
                 ),
                 _Stat(
                   'Repeat settings exercised',
@@ -83,6 +94,36 @@ class ReportView extends StatelessWidget {
                 ),
               ],
             ),
+
+            if (report.neverReached.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _Section(
+                title: 'Never reached',
+                subtitle:
+                    'No interview ever displayed these. Each is listed as a '
+                    'problem above, with the skips that closed the route.',
+                entries: (report.neverReached.toList()..sort())
+                    .take(30)
+                    .toList(),
+              ),
+            ],
+
+            if (report.deadEnds.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _Section(
+                title: 'Routes that had to go back',
+                subtitle:
+                    'An answer given earlier left no valid answer here, so '
+                    'the interview went back and changed it -- what a person '
+                    'does at a cross-field check. A count equal to the number '
+                    'of interviews means nobody can get through.',
+                entries: [
+                  for (final e in report.deadEnds.entries.toList()
+                    ..sort((a, b) => b.value.compareTo(a.value)))
+                    '${e.key} — ${e.value} of ${report.runs}',
+                ],
+              ),
+            ],
 
             if (report.unanswerable.isNotEmpty) ...[
               const SizedBox(height: 16),
@@ -130,9 +171,9 @@ class ReportView extends StatelessWidget {
 }
 
 class _FindingTile extends StatelessWidget {
-  const _FindingTile({required this.finding});
+  const _FindingTile({required this.group});
 
-  final Finding finding;
+  final FindingGroup group;
 
   @override
   Widget build(BuildContext context) {
@@ -156,16 +197,18 @@ class _FindingTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${finding.where} — ${finding.code}',
+                  '${group.where} — ${group.code}'
+                  '${group.count > 1 ? ' (×${group.count})' : ''}',
                   style: theme.textTheme.labelLarge,
                 ),
                 SelectableText(
-                  finding.detail,
+                  group.detail,
                   style: theme.textTheme.bodySmall,
                 ),
-                if (finding.seed != null)
+                if (group.seeds.isNotEmpty)
                   Text(
-                    'Replay with seed ${finding.seed}',
+                    'Replay with seed ${group.seeds.join(', ')}'
+                    '${group.count > group.seeds.length ? ', …' : ''}',
                     style: theme.textTheme.bodySmall?.copyWith(
                       fontStyle: FontStyle.italic,
                     ),

@@ -110,11 +110,19 @@ void main() {
     final base = pkg.baseCrf!;
     final table = base['tablename'] as String;
 
-    Future<List<String>> routeFor(int seed) async => (await FormRunner(
-      surveyId: pkg.surveyId,
-      tableName: table,
-      respondent: VirtualRespondent(seed: seed),
-    ).run()).route;
+    // Reinstalled before each replay, exactly as a real run reinstalls
+    // between interviews: a `<unique_check>` field now queries the database
+    // on the way past, so a route is only reproducible from the same
+    // starting state, not merely the same seed against whatever the last
+    // call already saved.
+    Future<List<String>> routeFor(int seed) async {
+      final fresh = await const PackageInstaller().install(pkg.sourceZip);
+      return (await FormRunner(
+        surveyId: fresh.surveyId,
+        tableName: table,
+        respondent: VirtualRespondent(seed: seed),
+      ).run()).route;
+    }
 
     expect(
       await routeFor(4242),

@@ -2,8 +2,10 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 
 import '../installer.dart';
+import '../reporting/html_report.dart';
 import '../sandbox.dart';
 import '../sim/report.dart';
 import '../sim/session.dart';
@@ -24,6 +26,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   InstalledPackage? _package;
   RunReport? _report;
+  File? _reportFile;
   String? _error;
   bool _busy = false;
   int _done = 0;
@@ -48,7 +51,10 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     try {
       final installed = await const PackageInstaller().install(zip);
-      setState(() => _package = installed);
+      setState(() {
+        _package = installed;
+        _reportFile = null;
+      });
     } on InstallException catch (e) {
       setState(() => _error = e.message);
     } catch (e) {
@@ -66,6 +72,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _busy = true;
       _error = null;
       _report = null;
+      _reportFile = null;
       _done = 0;
       _total = settings.runs;
     });
@@ -83,15 +90,30 @@ class _HomeScreenState extends State<HomeScreen> {
           _total = total;
         }),
       );
+      final reportFile = await _writeReport(report, reinstalled);
       setState(() {
         _package = reinstalled;
         _report = report;
+        _reportFile = reportFile;
       });
     } catch (e) {
       setState(() => _error = '$e');
     } finally {
       setState(() => _busy = false);
     }
+  }
+
+  /// Writes every run's report to disk automatically, so findings survive
+  /// after the window closes without needing a save step.
+  Future<File> _writeReport(RunReport report, InstalledPackage package) async {
+    final dir = Directory(p.join(widget.sandbox.root.path, 'reports'));
+    if (!await dir.exists()) await dir.create(recursive: true);
+    final stamp = DateTime.now()
+        .toIso8601String()
+        .replaceAll(RegExp(r'[:.]'), '-');
+    final file = File(p.join(dir.path, '${package.surveyId}_$stamp.html'));
+    await file.writeAsString(buildHtmlReport(report, package));
+    return file;
   }
 
   @override
@@ -135,6 +157,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       if (_report != null) ...[
                         const SizedBox(height: 20),
                         ReportView(report: _report!, package: package),
+                        if (_reportFile != null) ...[
+                          const SizedBox(height: 8),
+                          _ReportFileNote(file: _reportFile!),
+                        ],
                       ],
                     ],
                   ),
@@ -186,6 +212,34 @@ class _Welcome extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _ReportFileNote extends StatelessWidget {
+  const _ReportFileNote({required this.file});
+
+  final File file;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Icon(Icons.description_outlined, size: 16, color: theme.colorScheme.outline),
+        const SizedBox(width: 6),
+        Expanded(
+          child: SelectableText(
+            'Report saved to ${file.path}',
+            style: theme.textTheme.bodySmall,
+          ),
+        ),
+        if (Platform.isMacOS)
+          TextButton(
+            onPressed: () => Process.run('open', [file.path]),
+            child: const Text('Open'),
+          ),
+      ],
     );
   }
 }

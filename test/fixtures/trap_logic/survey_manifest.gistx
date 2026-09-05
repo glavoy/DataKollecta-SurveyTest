@@ -1,0 +1,18 @@
+{
+  "surveyName": "Trap Logic",
+  "surveyId": "trap_logic",
+  "databaseName": "trap_logic.sqlite",
+  "xmlFiles": [
+    "trap.xml"
+  ],
+  "crfs": [
+    {
+      "display_order": 10,
+      "tablename": "trap",
+      "displayname": "Trap",
+      "isbase": 1,
+      "primarykey": "code",
+      "display_fields": "code"
+    }
+  ]
+}

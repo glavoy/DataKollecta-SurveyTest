@@ -61,8 +61,22 @@ void main() {
     final counts = await session.recordCounts();
     expect(counts['hh_info'], 25);
 
-    // Every finding names a seed, or it cannot be reproduced.
+    // Every finding from a single interview names its seed, or it cannot be
+    // reproduced. Coverage findings deliberately do not: "no run reached this
+    // question" is a property of the whole batch, and there is no one run to
+    // replay.
+    const batchLevel = {
+      'question_never_reached',
+      'skip_rule_never_evaluated',
+      'skip_rule_never_fired',
+      'skip_rule_always_fired',
+      'form_never_entered',
+    };
     for (final finding in report.findings) {
+      if (batchLevel.contains(finding.code)) {
+        expect(finding.seed, isNull, reason: '${finding.code} names a seed');
+        continue;
+      }
       expect(finding.seed, isNotNull, reason: '${finding.code} has no seed');
     }
 
@@ -73,7 +87,14 @@ void main() {
         'questionsSeen=${report.questionsSeen.length} '
         'neverAnswered=${report.neverAnswered.length} '
         'repeatCells=${report.repeatCells} '
-        'unanswerable=${report.unanswerable.keys.take(5).toList()}');
+        'unanswerable=${report.unanswerable.keys.take(5).toList()} '
+        'deadEnds=${report.deadEnds}');
+    // ignore: avoid_print
+    print('neverReached=${report.neverReached.length} '
+        'skipsNeverEvaluated=${report.skipsNeverEvaluated.length} '
+        'skipsAlwaysFired=${report.skipsAlwaysFired.length} '
+        'skipsNeverFired=${report.skipsNeverFired.length} '
+        'of ${report.skipsDeclared.length} rules');
     for (final f in report.findings.take(6)) {
       // ignore: avoid_print
       print('  ${f.where}  ${f.code}  ${f.detail}');

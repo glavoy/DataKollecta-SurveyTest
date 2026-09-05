@@ -12,6 +12,7 @@ import 'package:datakollecta/services/csv_data_service.dart';
 import 'package:datakollecta/services/database_response_service.dart';
 import 'package:datakollecta/services/db_service.dart';
 import 'package:datakollecta/services/logic_service.dart';
+import 'package:datakollecta/services/skip_service.dart';
 import 'package:datakollecta/services/survey_config_service.dart';
 import 'package:datakollecta/services/survey_loader.dart';
 import 'package:datakollecta/services/survey_navigation_service.dart';
@@ -31,6 +32,8 @@ class FormRun {
     required this.uniqueId,
     required this.blockedBy,
     required this.unanswerable,
+    required this.cannotAdvance,
+    required this.deadEndRoutes,
     required this.saveError,
   });
 
@@ -54,14 +57,32 @@ class FormRun {
   final List<Decision> decisions;
   final String? uniqueId;
 
-  /// Questions whose logic check refused to let navigation past. A real
-  /// interviewer would fix the answer; the simulator records and moves on.
+  /// Every gate message this interview saw. A block is normal -- the
+  /// interviewer fixes the answer and carries on, and so does the runner.
+  /// What is not normal is [cannotAdvance].
   final List<String> blockedBy;
 
   /// Questions with no selectable option at all -- a csv or database filter
   /// that matched nothing for the answers given. An authoring defect, and one
   /// only a run can find.
   final List<String> unanswerable;
+
+  /// Questions no answer could get past, on the question's *own* rules --
+  /// nothing to select, a value no range admits, a logic check that reads only
+  /// this field. The app disables Next until the gate passes, so an
+  /// interviewer here can neither move on nor finish. Reported only after a
+  /// deliberately conservative answer was refused too, so a strategy drawing
+  /// unlucky values does not raise it.
+  final List<String> cannotAdvance;
+
+  /// Questions where the answers *already given* closed the route -- a logic
+  /// check comparing this field against another, like
+  /// `vx_dose2_date <= vx_dose1_date`. Not a defect: an interviewer presses
+  /// Previous and changes the earlier answer, and so does the runner. Counted
+  /// rather than reported as a problem, because on a chain of such checks a
+  /// random respondent abandons routes a person never would -- but a question
+  /// that closes on *every* run is worth a designer's eye.
+  final List<String> deadEndRoutes;
 
   final String? saveError;
 
@@ -91,11 +112,20 @@ class FormRunner {
     required this.surveyId,
     required this.tableName,
     required this.respondent,
+    this.onSkipEvaluated,
   });
 
   final String surveyId;
   final String tableName;
   final VirtualRespondent respondent;
+
+  /// Told about every skip rule the engine tries, and whether it fired.
+  ///
+  /// The rule is identified by [skipRuleId], which needs the question that
+  /// owns it -- `SkipCondition` carries no identity of its own, and the same
+  /// (field, operator, value, target) can legitimately appear twice in one
+  /// form.
+  final void Function(String ruleId, bool fired)? onSkipEvaluated;
 
   static const AppStrings _strings = AppStrings(AppConfig.isFrench);
 
@@ -132,6 +162,12 @@ class FormRunner {
     final route = <String>[];
     final blocked = <String>[];
     final unanswerable = <String>[];
+    final cannotAdvance = <String>[];
+    final deadEndRoutes = <String>[];
+    // How many times each question has sent the interviewer back. Bounded,
+    // because a form really can contain a question with no way past it and
+    // the run has to end either way.
+    final retreats = <String, int>{};
 
     final assetPath = await SurveyConfigService().getQuestionnaireAssetPath(
       _questionnaireFilename,
@@ -164,11 +200,28 @@ class FormRunner {
     // testing an earlier answer, so a respondent steering only its own
     // question's postskips cannot influence the route at all.
     final rulesByTestedField = <String, List<SkipCondition>>{};
+    // Identity-keyed, because `SkipCondition` does not override `==` and two
+    // rules with the same triple must stay distinct.
+    final ruleIds = <SkipCondition, String>{};
     for (final q in questions) {
       for (final rule in [...q.preSkips, ...q.postSkips]) {
         (rulesByTestedField[rule.fieldName] ??= []).add(rule);
       }
+      for (var i = 0; i < q.preSkips.length; i++) {
+        ruleIds[q.preSkips[i]] = skipRuleId(tableName, q, 'preskip', i);
+      }
+      for (var i = 0; i < q.postSkips.length; i++) {
+        ruleIds[q.postSkips[i]] = skipRuleId(tableName, q, 'postskip', i);
+      }
     }
+
+    final observer = onSkipEvaluated;
+    final SkipObserver? watch = observer == null
+        ? null
+        : (skip, fired) {
+            final id = ruleIds[skip];
+            if (id != null) observer(id, fired);
+          };
 
     Future<void> processAutomatic(Question q) async {
       await AutomaticFieldService.compute(
@@ -189,6 +242,7 @@ class FormRunner {
       answers: answers,
       processAutomaticQuestion: processAutomatic,
       primaryKeyFields: primaryKeyFields,
+      onSkipEvaluated: watch,
     );
 
     final history = <int>[];
@@ -213,31 +267,100 @@ class FormRunner {
         unanswerable.add(question.fieldName);
       }
 
-      if (question.type != QuestionType.information) {
-        final value = respondent.answerFor(
-          question,
-          options: options,
-          rulesTestingThis: rulesByTestedField[question.fieldName] ?? const [],
-        );
+      // The Next button, as the app draws it.
+      //
+      // `SurveyScreen` computes
+      // `canProceed = (information || (isAnswered && isValid)) &&
+      // _logicError == null` on every build and passes `null` to `onPressed`
+      // when it is false -- so a blank non-optional answer, a value outside
+      // its range, a half-typed fixed-length key or a failing `logic_check`
+      // makes moving on *impossible*, not merely noisy. `_next` then adds the
+      // `<unique_check>` round-trip and returns without advancing on a
+      // collision. Walking past any of that would let this runner produce
+      // routes the field app cannot, and would report a question an
+      // interviewer is stuck on as a tally line.
+      //
+      // So: answer, gate, re-answer. The last few attempts ask for a
+      // deliberately conservative value, because a strategy drawing unlucky
+      // ones must not be mistaken for a form with no way through.
+      const attempts = 25;
+      const safeFrom = attempts - 5;
+      var advanced = question.type == QuestionType.information;
+      String? lastBlock;
+
+      for (var attempt = 0; !advanced && attempt < attempts; attempt++) {
+        final value = attempt < safeFrom
+            ? respondent.answerFor(
+                question,
+                options: options,
+                rulesTestingThis:
+                    rulesByTestedField[question.fieldName] ?? const [],
+              )
+            : respondent.satisfyingAnswerFor(
+                question,
+                options: options,
+                answers: answers,
+              );
+
         if (value == null) {
           answers.remove(question.fieldName);
         } else {
           answers[question.fieldName] = value;
         }
 
+        // What `_onAnswerChanged` does, for the message.
         final validation = AnswerValidationService.evaluate(
           question,
           answers,
           _strings,
         );
-        if (validation.message != null) {
-          blocked.add('${question.fieldName}: ${validation.message}');
+        // What `build` does, for the button. `evaluate` stays silent on a
+        // half-typed fixed-length field, so the message and the gate can
+        // disagree -- the gate is the one that decides.
+        if (AnswerValidationService.canProceed(question, answers, _strings)) {
+          final collision = await _uniqueCheckMessage(question, value);
+          if (collision == null) {
+            advanced = true;
+            break;
+          }
+          lastBlock = collision;
+        } else {
+          // The app shows nothing at all for a blank or half-typed answer --
+          // the button is simply dead. A report that said nothing either
+          // would be useless, so name the half of the gate that failed.
+          lastBlock = validation.message ??
+              LogicService.evaluateLogicChecks(question, answers) ??
+              (AnswerValidationService.isAnswered(question, answers)
+                  ? 'the answer does not satisfy this question, '
+                      'and no message is shown'
+                  : 'no answer, and the question is not optional');
         }
+        blocked.add('${question.fieldName}: $lastBlock');
       }
 
-      final logicError = LogicService.evaluateLogicChecks(question, answers);
-      if (logicError != null) {
-        blocked.add('${question.fieldName}: $logicError');
+      if (!advanced) {
+        // A gate can close for two quite different reasons, and calling both
+        // a dead end would bury the one that matters.
+        //
+        // The question itself may be impassable -- a logic check no value
+        // satisfies, a response list that resolved to nothing. Or the answers
+        // *already given* may have closed it: `vx_dose2_date` must fall after
+        // `vx_dose1_date`, and if dose 1 was entered as today then no date in
+        // range will do. The second is not a defect in the form, and an
+        // interviewer meeting it does the obvious thing -- presses Previous
+        // and changes the earlier answer. So does this.
+        const maxRetreats = 3;
+        final taken = retreats[question.fieldName] ?? 0;
+        if (history.isNotEmpty && taken < maxRetreats) {
+          retreats[question.fieldName] = taken + 1;
+          index = history.removeLast();
+          continue;
+        }
+        if (_blockedByAnotherField(question, questions, answers)) {
+          deadEndRoutes.add(question.fieldName);
+        } else {
+          cannotAdvance.add(question.fieldName);
+        }
       }
 
       if (respondent.shouldBacktrack(history.length)) {
@@ -253,6 +376,7 @@ class FormRunner {
         answers: answers,
         processAutomaticQuestion: processAutomatic,
         primaryKeyFields: primaryKeyFields,
+        onSkipEvaluated: watch,
       );
 
       // Parked on the last question means the walk ran off the end.
@@ -291,8 +415,88 @@ class FormRunner {
       uniqueId: storedRow['uniqueid']?.toString(),
       blockedBy: blocked,
       unanswerable: unanswerable,
+      cannotAdvance: cannotAdvance,
+      deadEndRoutes: deadEndRoutes,
       saveError: saveError,
     );
+  }
+
+  /// Whether what is blocking [question] is an answer given somewhere else.
+  ///
+  /// The two cases need telling apart or the useful one drowns. A question
+  /// with nothing to select, or a range no value satisfies, is closed for
+  /// everybody. A logic check reading a *second* field --
+  /// `vx_dose2_date <= vx_dose1_date`, `age <> age_calculated` -- is closed
+  /// only for the answers this interview happens to hold, and a person just
+  /// goes back and changes them.
+  ///
+  /// Deliberately coarse: it asks whether the question is answered and valid
+  /// on its own terms and still blocked, and whether any of its logic checks
+  /// name another field of this form. Deciding *which* check failed would
+  /// mean re-implementing `LogicService`'s grammar, and this does not need to
+  /// know.
+  bool _blockedByAnotherField(
+    Question question,
+    List<Question> questions,
+    Map<String, dynamic> answers,
+  ) {
+    if (!AnswerValidationService.isAnswered(question, answers)) return false;
+    if (!AnswerValidationService.isValid(question, answers)) return false;
+    if (LogicService.evaluateLogicChecks(question, answers) == null) {
+      return false;
+    }
+
+    final others = {
+      for (final q in questions)
+        if (q.fieldName != question.fieldName) q.fieldName,
+    };
+    final identifier = RegExp(r'[A-Za-z_]\w*');
+    return question.logicChecks.any(
+      (check) => identifier
+          .allMatches(check.condition)
+          .any((m) => others.contains(m.group(0))),
+    );
+  }
+
+  /// The `<unique_check>` round-trip `SurveyScreen._next` makes on the way
+  /// past, or null when the value is free.
+  ///
+  /// New records only, so there is no `_originalAnswers` to compare against:
+  /// every value here is a change. A mask -- or the free-text pool -- too
+  /// small to stay unique across this many records is a fact about the
+  /// survey, and the caller's attempt bound is what stops it looping.
+  Future<String?> _uniqueCheckMessage(Question question, Object? value) async {
+    if (question.uniqueCheck == null || value == null || '$value'.isEmpty) {
+      return null;
+    }
+    final isUnique = await DbService.isValueUnique(
+      surveyId,
+      tableName,
+      question.fieldName,
+      '$value',
+    );
+    if (isUnique) return null;
+    return question.uniqueCheck!.message ?? _strings.valueAlreadyExists;
+  }
+
+  /// A stable name for one skip rule, for coverage.
+  ///
+  /// Owner and position are part of it because `SkipCondition` carries no
+  /// identity and the same (field, operator, value, target) can legitimately
+  /// appear on two questions -- or twice on one, once as a preskip and once
+  /// as a postskip.
+  static String skipRuleId(
+    String table,
+    Question owner,
+    String kind,
+    int order,
+  ) {
+    final rule = kind == 'preskip'
+        ? owner.preSkips[order]
+        : owner.postSkips[order];
+    return '$table.${owner.fieldName}.$kind[$order] '
+        '${rule.fieldName} ${rule.condition} ${rule.response} '
+        '-> ${rule.skipToFieldName}';
   }
 
   /// Reproduces what happens because a question is rendered.

@@ -1,0 +1,216 @@
+<?xml version = '1.0' encoding = 'utf-8'?>
+<survey>
+
+
+	<question type = 'automatic' fieldname = 'starttime' fieldtype = 'datetime'>
+	</question>
+
+
+	<question type = 'automatic' fieldname = 'startdate' fieldtype = 'date'>
+	</question>
+
+
+	<question type = 'date' fieldname = 'visit_date' fieldtype = 'date'>
+		<text>Date of visit</text>
+		<maxCharacters>12</maxCharacters>
+		<date_range>
+			<min_date>-100y</min_date>
+			<max_date>+0d</max_date>
+		</date_range>
+	</question>
+
+
+	<question type = 'text' fieldname = 'arrival_time' fieldtype = 'text'>
+		<text>Time participant arrived</text>
+		<maxCharacters>5</maxCharacters>
+		<mask value="[0-9][0-9]:[0-9][0-9]" />
+	</question>
+
+
+	<question type = 'radio' fieldname = 'facility' fieldtype = 'integer'>
+		<text>Health facility</text>
+		<maxCharacters>1</maxCharacters>
+		<responses>
+			<response value = '1'>Apac</response>
+			<response value = '2'>Aduku</response>
+			<response value = '3'>Ibuje</response>
+			<response value = '4'>Chegere</response>
+			<response value = '5'>Akokoro</response>
+		</responses>
+	</question>
+
+
+	<question type = 'text' fieldname = 'participant_id' fieldtype = 'text'>
+		<text>Participant ID</text>
+		<maxCharacters>=7</maxCharacters>
+		<mask value="OP-[0-9][0-9][0-9][0-9][0-9][0-9][0-9]" />
+		<unique_check>
+			<message>This will cause duplicates</message>
+		</unique_check>
+	</question>
+
+
+	<question type = 'radio' fieldname = 'sex' fieldtype = 'integer'>
+		<text>Sex of participant</text>
+		<maxCharacters>1</maxCharacters>
+		<responses>
+			<response value = '1'>Male</response>
+			<response value = '2'>Female</response>
+		</responses>
+		<postskip>
+			<skip fieldname='sex' condition = '=' response='1' response_type='fixed' skiptofieldname ='treatment'></skip>
+		</postskip>
+	</question>
+
+
+	<question type = 'text' fieldname = 'age_years' fieldtype = 'text_integer'>
+		<text>Age in completed years</text>
+		<maxCharacters>3</maxCharacters>
+		<numeric_check>
+			<values minvalue ='0' maxvalue='99' other_values = '0' message = 'Number must be between 0 and 99!'></values>
+		</numeric_check>
+	</question>
+
+
+	<question type = 'text' fieldname = 'age_months' fieldtype = 'text_integer'>
+		<text>Age in completed months</text>
+		<maxCharacters>3</maxCharacters>
+		<numeric_check>
+			<values minvalue ='0' maxvalue='11' other_values = '0' message = 'Number must be between 0 and 11!'></values>
+		</numeric_check>
+		<preskip>
+			<skip fieldname='age_years' condition = '&gt;=' response='1' response_type='fixed' skiptofieldname ='weight'></skip>
+		</preskip>
+	</question>
+
+
+	<question type = 'text' fieldname = 'weight' fieldtype = 'text_integer'>
+		<text>Weight (kg)</text>
+		<maxCharacters>5</maxCharacters>
+		<numeric_check>
+			<values minvalue ='2' maxvalue='150' other_values = '2' message = 'Number must be between 2 and 150!'></values>
+		</numeric_check>
+	</question>
+
+
+	<question type = 'text' fieldname = 'temperature' fieldtype = 'text_integer'>
+		<text>Axillary temperature</text>
+		<maxCharacters>4</maxCharacters>
+		<numeric_check>
+			<values minvalue ='30' maxvalue='45' other_values = '30' message = 'Number must be between 30 and 45!'></values>
+		</numeric_check>
+	</question>
+
+
+	<question type = 'radio' fieldname = 'fever48h' fieldtype = 'integer'>
+		<text>Fever in last 48 hours</text>
+		<maxCharacters>1</maxCharacters>
+		<responses>
+			<response value = '1'>Yes</response>
+			<response value = '0'>No</response>
+		</responses>
+		<dont_know>-7</dont_know>
+	</question>
+
+
+	<question type = 'checkbox' fieldname = 'symptoms' fieldtype = 'text'>
+		<text>Symptoms reported</text>
+		<responses>
+			<response value = '1'>Headache</response>
+			<response value = '2'>Chills</response>
+			<response value = '3'>Vomiting</response>
+			<response value = '4'>Diarrhoea</response>
+			<response value = '5'>Joint pain</response>
+			<response value = '6'>Cough</response>
+			<response value = '7'>None</response>
+		</responses>
+		<preskip>
+			<skip fieldname='sex' condition = '=' response='2' response_type='fixed' skiptofieldname ='comments'></skip>
+			<skip fieldname='fever48h' condition = '&lt;&gt;' response='1' response_type='fixed' skiptofieldname ='symptom_days'></skip>
+		</preskip>
+	</question>
+
+
+	<question type = 'text' fieldname = 'symptom_days' fieldtype = 'text_integer'>
+		<text>Days with symptoms</text>
+		<maxCharacters>2</maxCharacters>
+		<numeric_check>
+			<values minvalue ='1' maxvalue='30' other_values = '1' message = 'Number must be between 1 and 30!'></values>
+		</numeric_check>
+		<preskip>
+			<skip fieldname='fever48h' condition = '&lt;&gt;' response='1' response_type='fixed' skiptofieldname ='rdt_done'></skip>
+		</preskip>
+	</question>
+
+
+	<question type = 'radio' fieldname = 'rdt_done' fieldtype = 'integer'>
+		<text>RDT performed today</text>
+		<maxCharacters>1</maxCharacters>
+		<responses>
+			<response value = '1'>Yes</response>
+			<response value = '0'>No</response>
+		</responses>
+		<postskip>
+			<skip fieldname='rdt_done' condition = '=' response='0' response_type='fixed' skiptofieldname ='treatment'></skip>
+		</postskip>
+	</question>
+
+
+	<question type = 'radio' fieldname = 'rdt_result' fieldtype = 'integer'>
+		<text>RDT result</text>
+		<maxCharacters>1</maxCharacters>
+		<responses>
+			<response value = '1'>Positive</response>
+			<response value = '2'>Negative</response>
+			<response value = '3'>Invalid</response>
+		</responses>
+	</question>
+
+
+	<question type = 'radio' fieldname = 'treatment' fieldtype = 'integer'>
+		<text>Treatment given</text>
+		<maxCharacters>1</maxCharacters>
+		<responses>
+			<response value = '1'>ACT</response>
+			<response value = '2'>Other antimalarial</response>
+			<response value = '3'>Paracetamol</response>
+			<response value = '4'>None</response>
+		</responses>
+		<preskip>
+			<skip fieldname='rdt_result' condition = '&lt;&gt;' response='1' response_type='fixed' skiptofieldname ='comments'></skip>
+		</preskip>
+	</question>
+
+
+	<question type = 'text' fieldname = 'comments' fieldtype = 'text'>
+		<text>Comments</text>
+		<maxCharacters>100</maxCharacters>
+	</question>
+
+
+	<question type = 'automatic' fieldname = 'uniqueid' fieldtype = 'text'>
+	</question>
+
+
+	<question type = 'automatic' fieldname = 'swver' fieldtype = 'text'>
+	</question>
+
+
+	<question type = 'automatic' fieldname = 'survey_id' fieldtype = 'text'>
+	</question>
+
+
+	<question type = 'automatic' fieldname = 'lastmod' fieldtype = 'datetime'>
+	</question>
+
+
+	<question type = 'automatic' fieldname = 'stoptime' fieldtype = 'datetime'>
+	</question>
+
+
+	<question type = 'information' fieldname = 'end_of_questions' fieldtype = 'n/a'>
+		<text>Press the 'Finish' button to save the data.</text >
+	</question>
+
+
+</survey>
