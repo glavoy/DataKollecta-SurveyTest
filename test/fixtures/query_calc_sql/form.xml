@@ -1,0 +1,48 @@
+<?xml version = '1.0' encoding = 'utf-8'?>
+<!--
+  A <calculation type='query'> carrying a second statement. The app runs a
+  query calculation on the survey's own read/write connection and swallows
+  whatever it returns, so this would delete rows in the field and report
+  nothing. The package is refused at install instead -- there is no run to
+  report a finding from, which is the point.
+-->
+<survey>
+
+	<question type = 'automatic' fieldname = 'starttime' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'code' fieldtype = 'text'>
+	</question>
+
+	<question type = 'text' fieldname = 'mrccode' fieldtype = 'text'>
+		<text>mrccode</text>
+		<maxCharacters>4</maxCharacters>
+	</question>
+
+	<question type = 'automatic' fieldname = 'village' fieldtype = 'text'>
+		<calculation type = 'query'>
+			<sql>SELECT mrcname FROM form WHERE mrccode = @mrccode; DELETE FROM form</sql>
+			<parameter name = '@mrccode' field = 'mrccode'/>
+		</calculation>
+	</question>
+
+	<question type = 'automatic' fieldname = 'uniqueid' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'swver' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'survey_id' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'lastmod' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'stoptime' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'information' fieldname = 'end_of_questions' fieldtype = 'n/a'>
+		<text>Press the 'Finish' button to save the data.</text >
+	</question>
+
+</survey>

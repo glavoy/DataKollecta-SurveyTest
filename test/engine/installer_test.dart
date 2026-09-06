@@ -57,6 +57,25 @@ void main() {
     );
   });
 
+  test('a query calculation that is not one SELECT refuses the package',
+      () async {
+    // The one place a dictionary supplies a whole SQL statement rather than a
+    // name. AutoFields runs it on the survey's read/write connection and
+    // swallows the result, so a package that got this far would delete rows in
+    // the field and say nothing. The app refuses it at parse; what this pins
+    // is that the refusal reaches a designer as an InstallException naming the
+    // package and the question, not a bare DatabaseException from a repo they
+    // have never heard of.
+    expect(
+      () => installFixture('query_calc_sql', root),
+      throwsA(isA<InstallException>().having(
+          (e) => e.message,
+          'message',
+          allOf(contains('query_calc_sql.zip'), contains('village'),
+              contains('single SELECT')))),
+    );
+  });
+
   test('reinstalling in one process picks up the new package', () async {
     final zip = buildFixtureZip('household_repeat', root);
     final first = await const PackageInstaller().install(zip);

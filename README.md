@@ -23,6 +23,16 @@ came from one interview carries a **seed** that replays that interview exactly.
 
 Runs are deterministic for a given seed, so a report can be reproduced and compared after a fix.
 
+## Before a run: the package can be refused outright
+
+Some things are not findings, because there is nothing to run. The app validates every table
+and column name a dictionary supplies as it reads the package, and holds the SQL of a
+`<calculation type="query">` to a single `SELECT` -- that calculation runs on the survey's own
+read/write database and its result is swallowed, so a statement that is not a lookup would
+change data in the field and report nothing. A package that breaks either rule does not
+install, in this tool or on a device, and the error names the package and the question to fix.
+Fix the row and run again.
+
 ## How a run works
 
 1. **Lint.** The package is read and checked without running anything, using the engine's own

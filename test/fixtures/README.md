@@ -18,4 +18,5 @@ fixture to the row below.
 | `logic_inert` | `logic_check_inert` | a check whose operand every route has skipped |
 | `csv_cascade_empty` | `csv_cascade_empty` | a parent option with no rows in the csv |
 | `skip_dropped` | `skip_dropped_by_parser` | a `<skip>` with no fieldname |
+| `query_calc_sql` | refused at install | a `<calculation type='query'>` carrying a second statement -- the app runs query calculations on the survey's own read/write connection, so it must be one SELECT |
 | `household_repeat` | none (clean) | a parent with a generated id, a repeating child, and a follow-up entered by hand when `enrolled=1`; the engine self-tests run on it |

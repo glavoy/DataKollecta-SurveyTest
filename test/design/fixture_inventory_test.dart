@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:surveytest/installer.dart';
 import 'package:surveytest/lint/package_lint.dart';
 import 'package:surveytest/sandbox.dart';
 import 'package:surveytest/sim/report.dart';
@@ -31,6 +32,18 @@ void main() {
     'skip_dropped': {'skip_dropped_by_parser'},
   };
 
+  /// Fixture -> a fragment of the message its install must be refused with.
+  ///
+  /// The third kind of fixture, and the reason `every fixture on disk has a
+  /// row` unions three maps rather than reading `lint` alone: these never
+  /// install, so they produce no code and no run. A dictionary the app cannot
+  /// use is refused outright rather than degraded, and what has to stay true
+  /// is that the refusal reaches a designer naming the package and the
+  /// question -- which is asserted in full in `test/engine/installer_test.dart`.
+  const refused = <String, String>{
+    'query_calc_sql': 'single SELECT',
+  };
+
   /// Fixture -> the design code a run must produce, when the lint alone
   /// cannot.
   const runtime = <String, String>{
@@ -53,8 +66,18 @@ void main() {
   });
 
   test('every fixture on disk has a row', () {
-    expect(fixtureNames().toSet(), lint.keys.toSet());
+    expect(fixtureNames().toSet(), {...lint.keys, ...refused.keys});
   });
+
+  for (final entry in refused.entries) {
+    test('${entry.key}: the package is refused, not degraded', () async {
+      expect(
+        () => installFixture(entry.key, root),
+        throwsA(isA<InstallException>()
+            .having((e) => e.message, 'message', contains(entry.value))),
+      );
+    });
+  }
 
   for (final entry in lint.entries) {
     test('${entry.key}: lint reports exactly ${entry.value}', () async {

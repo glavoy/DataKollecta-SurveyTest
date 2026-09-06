@@ -1,0 +1,23 @@
+{
+  "surveyName": "Query Calc Sql",
+  "surveyId": "query_calc_sql",
+  "databaseName": "query_calc_sql.sqlite",
+  "xmlFiles": [
+    "form.xml"
+  ],
+  "crfs": [
+    {
+      "display_order": 10,
+      "tablename": "form",
+      "displayname": "form",
+      "isbase": 1,
+      "primarykey": "code",
+      "display_fields": "code",
+      "idconfig": {
+        "prefix": "F",
+        "fields": [],
+        "incrementLength": 4
+      }
+    }
+  ]
+}
