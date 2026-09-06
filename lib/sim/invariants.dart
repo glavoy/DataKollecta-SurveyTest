@@ -55,6 +55,48 @@ class Invariants {
     }
 
     findings.addAll(await _checkKeys(scenario, db, seed));
+    findings.addAll(await _checkLinks(scenario, db, seed));
+    return findings;
+  }
+
+  /// Every saved child carries the parent's linking value -- `barcode`,
+  /// `hhid` -- in the column the crfs names, filled by the engine without
+  /// the interviewer typing it. A child that does not is an orphan in the
+  /// export.
+  Future<List<Finding>> _checkLinks(
+    Scenario scenario,
+    Database db,
+    int seed,
+  ) async {
+    final findings = <Finding>[];
+    for (final child in scenario.children) {
+      if (!child.saved) continue;
+      final crf = await DbService.getCrfConfig(surveyId, child.tableName);
+      final linking = crf?['linkingfield']?.toString() ?? '';
+      if (linking.isEmpty) continue;
+      final rows = await db.query(
+        child.tableName,
+        where: 'uniqueid = ?',
+        whereArgs: [child.uniqueId],
+      );
+      if (rows.isEmpty) continue;
+      final stored = rows.single[linking];
+      final expected = scenario.parent.storedRow[linking];
+      if (!AnswerEquality.sameAnswer(stored, expected)) {
+        findings.add(
+          Finding(
+            code: 'child_link_missing',
+            table: child.tableName,
+            field: linking,
+            seed: seed,
+            detail:
+                'holds "${stored ?? ''}" but the parent\'s $linking is '
+                '"${expected ?? ''}". The linking value is meant to be filled '
+                'automatically when the child is opened from its parent.',
+          ),
+        );
+      }
+    }
     return findings;
   }
 

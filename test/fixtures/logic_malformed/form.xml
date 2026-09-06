@@ -1,13 +1,8 @@
 <?xml version = '1.0' encoding = 'utf-8'?>
 <!--
-  A form with a question no answer can get past.
-
-  `age` declares a range of 0..99 and a logic check on `age >= 0`. A logic
-  check fails when its condition is TRUE, so every value the range permits
-  trips it: the app's Next button is dead and the interviewer can neither
-  move on nor finish. Hand-written rather than generated, because no data
-  dictionary the generator accepts would produce it -- which is the point,
-  since this is what the runner's own gate has to detect.
+  A logic check the engine cannot read. `age 18` has no operator, so the
+  engine's parser throws; in the field it shows as an error and the Next
+  button never enables.
 -->
 <survey>
 
@@ -18,18 +13,17 @@
 	</question>
 
 	<question type = 'text' fieldname = 'age' fieldtype = 'text_integer'>
-		<text>Age in completed years</text>
+		<text>age</text>
 		<maxCharacters>3</maxCharacters>
 		<numeric_check>
 			<values minvalue ='0' maxvalue='99' other_values = '0' message = 'Number must be between 0 and 99!'></values>
 		</numeric_check>
-		<logic_check message='This question can never be satisfied'>age &gt;= 0</logic_check>
+		<logic_check message='Age must be sensible'>age 18</logic_check>
 	</question>
 
-	<question type = 'text' fieldname = 'comments' fieldtype = 'text'>
-		<text>Comments</text>
-		<maxCharacters>100</maxCharacters>
-		<optional></optional>
+	<question type = 'text' fieldname = 'after' fieldtype = 'text'>
+		<text>after</text>
+		<maxCharacters>20</maxCharacters>
 	</question>
 
 	<question type = 'automatic' fieldname = 'uniqueid' fieldtype = 'text'>

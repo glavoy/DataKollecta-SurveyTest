@@ -1,0 +1,56 @@
+<?xml version = '1.0' encoding = 'utf-8'?>
+<!--
+  Region 3 exists in the parent's list and nowhere in villages.csv, so an
+  interviewer who chooses it has nothing to select.
+-->
+<survey>
+
+	<question type = 'automatic' fieldname = 'starttime' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'code' fieldtype = 'text'>
+	</question>
+
+	<question type = 'radio' fieldname = 'region' fieldtype = 'integer'>
+		<text>region</text>
+		<responses>
+			<response value = '1'>Option 1</response>
+			<response value = '2'>Option 2</response>
+			<response value = '3'>Option 3</response>
+		</responses>
+	</question>
+
+	<question type = 'radio' fieldname = 'village' fieldtype = 'integer'>
+		<text>village</text>
+		<responses source='csv' file='villages.csv'>
+			<filter column='region' operator='=' value='[[region]]'/>
+			<display column='villagename'/>
+			<value column='vcode'/>
+		</responses>
+	</question>
+
+	<question type = 'text' fieldname = 'after' fieldtype = 'text'>
+		<text>after</text>
+		<maxCharacters>20</maxCharacters>
+	</question>
+
+	<question type = 'automatic' fieldname = 'uniqueid' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'swver' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'survey_id' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'lastmod' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'stoptime' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'information' fieldname = 'end_of_questions' fieldtype = 'n/a'>
+		<text>Press the 'Finish' button to save the data.</text >
+	</question>
+
+</survey>

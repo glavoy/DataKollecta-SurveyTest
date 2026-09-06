@@ -1,0 +1,62 @@
+<?xml version = '1.0' encoding = 'utf-8'?>
+<!--
+  Two postskips that split Yes and No but forget Don't know. A -7 matches
+  neither and falls through to `between`, a question meant for nobody.
+-->
+<survey>
+
+	<question type = 'automatic' fieldname = 'starttime' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'code' fieldtype = 'text'>
+	</question>
+
+	<question type = 'radio' fieldname = 'fever' fieldtype = 'integer'>
+		<text>fever</text>
+		<responses>
+			<response value = '1'>Option 1</response>
+			<response value = '0'>Option 0</response>
+		</responses>
+		<dont_know>-7</dont_know>
+		<postskip>
+			<skip fieldname='fever' condition = '=' response='1' response_type='fixed' skiptofieldname ='a'></skip>
+		
+			<skip fieldname='fever' condition = '=' response='0' response_type='fixed' skiptofieldname ='b'></skip>
+		</postskip>
+	</question>
+
+	<question type = 'text' fieldname = 'between' fieldtype = 'text'>
+		<text>between</text>
+		<maxCharacters>20</maxCharacters>
+	</question>
+
+	<question type = 'text' fieldname = 'a' fieldtype = 'text'>
+		<text>a</text>
+		<maxCharacters>20</maxCharacters>
+	</question>
+
+	<question type = 'text' fieldname = 'b' fieldtype = 'text'>
+		<text>b</text>
+		<maxCharacters>20</maxCharacters>
+	</question>
+
+	<question type = 'automatic' fieldname = 'uniqueid' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'swver' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'survey_id' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'lastmod' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'stoptime' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'information' fieldname = 'end_of_questions' fieldtype = 'n/a'>
+		<text>Press the 'Finish' button to save the data.</text >
+	</question>
+
+</survey>

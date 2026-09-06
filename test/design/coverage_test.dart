@@ -7,7 +7,7 @@ import 'package:surveytest/sim/report.dart';
 import 'package:surveytest/sim/session.dart';
 import 'package:surveytest/sim/virtual_respondent.dart';
 
-import 'support/fixture_package.dart';
+import '../support/fixture_package.dart';
 
 /// The defect this whole coverage mechanism exists for.
 ///

@@ -1,0 +1,96 @@
+<?xml version = '1.0' encoding = 'utf-8'?>
+<!--
+  A question behind three independent gates.
+
+  `rare_q` is displayed only when a, b and c are all 1 -- each an eight-way
+  choice, so a uniformly random interview reaches it once in 512. A random
+  batch of the size a designer runs will call it "never reached" on the
+  strength of bad luck; a steered interview reaches it on the first try.
+  There is nothing wrong with this form. It exists so the report can be held
+  to telling the two apart.
+-->
+<survey>
+
+	<question type = 'automatic' fieldname = 'starttime' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'code' fieldtype = 'text'>
+	</question>
+
+	<question type = 'radio' fieldname = 'a' fieldtype = 'integer'>
+		<text>Gate a</text>
+		<responses>
+			<response value = '1'>Option 1</response>
+			<response value = '2'>Option 2</response>
+			<response value = '3'>Option 3</response>
+			<response value = '4'>Option 4</response>
+			<response value = '5'>Option 5</response>
+			<response value = '6'>Option 6</response>
+			<response value = '7'>Option 7</response>
+			<response value = '8'>Option 8</response>
+		</responses>
+	</question>
+
+	<question type = 'radio' fieldname = 'b' fieldtype = 'integer'>
+		<text>Gate b</text>
+		<responses>
+			<response value = '1'>Option 1</response>
+			<response value = '2'>Option 2</response>
+			<response value = '3'>Option 3</response>
+			<response value = '4'>Option 4</response>
+			<response value = '5'>Option 5</response>
+			<response value = '6'>Option 6</response>
+			<response value = '7'>Option 7</response>
+			<response value = '8'>Option 8</response>
+		</responses>
+	</question>
+
+	<question type = 'radio' fieldname = 'c' fieldtype = 'integer'>
+		<text>Gate c</text>
+		<responses>
+			<response value = '1'>Option 1</response>
+			<response value = '2'>Option 2</response>
+			<response value = '3'>Option 3</response>
+			<response value = '4'>Option 4</response>
+			<response value = '5'>Option 5</response>
+			<response value = '6'>Option 6</response>
+			<response value = '7'>Option 7</response>
+			<response value = '8'>Option 8</response>
+		</responses>
+	</question>
+
+	<question type = 'text' fieldname = 'rare_q' fieldtype = 'text'>
+		<text>Only when a, b and c are all 1</text>
+		<maxCharacters>20</maxCharacters>
+		<preskip>
+			<skip fieldname='a' condition = '&lt;&gt;' response='1' response_type='fixed' skiptofieldname ='after'></skip>
+			<skip fieldname='b' condition = '&lt;&gt;' response='1' response_type='fixed' skiptofieldname ='after'></skip>
+			<skip fieldname='c' condition = '&lt;&gt;' response='1' response_type='fixed' skiptofieldname ='after'></skip>
+		</preskip>
+	</question>
+
+	<question type = 'text' fieldname = 'after' fieldtype = 'text'>
+		<text>Everyone sees this</text>
+		<maxCharacters>20</maxCharacters>
+	</question>
+
+	<question type = 'automatic' fieldname = 'uniqueid' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'swver' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'survey_id' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'lastmod' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'stoptime' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'information' fieldname = 'end_of_questions' fieldtype = 'n/a'>
+		<text>Press the 'Finish' button to save the data.</text >
+	</question>
+
+</survey>

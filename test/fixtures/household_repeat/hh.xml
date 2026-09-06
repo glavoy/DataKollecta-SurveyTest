@@ -1,0 +1,83 @@
+<?xml version = '1.0' encoding = 'utf-8'?>
+<!--
+  A household with a generated id and a repeating child form.
+
+  `hhid` is built by the crfs idconfig from `district` (1 digit) and `hhnum`
+  (3 digits). `n_members` says how many `member` records follow; the crfs
+  row sets auto_start_repeat=2 and repeat_enforce_count=3, so the loop opens
+  automatically and the parent's count is rewritten to what was entered.
+  Every engine self-test that used to reach for a study's zip runs on this.
+-->
+<survey>
+
+	<question type = 'automatic' fieldname = 'starttime' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'startdate' fieldtype = 'date'>
+	</question>
+
+	<question type = 'radio' fieldname = 'district' fieldtype = 'integer'>
+		<text>district</text>
+		<responses>
+			<response value = '1'>Option 1</response>
+			<response value = '2'>Option 2</response>
+			<response value = '3'>Option 3</response>
+		</responses>
+	</question>
+
+	<question type = 'text' fieldname = 'hhnum' fieldtype = 'text_integer'>
+		<text>hhnum</text>
+		<maxCharacters>3</maxCharacters>
+		<numeric_check>
+			<values minvalue ='1' maxvalue='999' other_values = '1' message = 'Number must be between 1 and 999!'></values>
+		</numeric_check>
+	</question>
+
+	<question type = 'automatic' fieldname = 'hhid' fieldtype = 'text'>
+	</question>
+
+	<question type = 'radio' fieldname = 'enrolled' fieldtype = 'integer'>
+		<text>enrolled</text>
+		<responses>
+			<response value = '1'>Option 1</response>
+			<response value = '0'>Option 0</response>
+		</responses>
+	</question>
+
+	<question type = 'text' fieldname = 'n_members' fieldtype = 'text_integer'>
+		<text>n_members</text>
+		<maxCharacters>3</maxCharacters>
+		<numeric_check>
+			<values minvalue ='1' maxvalue='4' other_values = '1' message = 'Number must be between 1 and 4!'></values>
+		</numeric_check>
+		<preskip>
+			<skip fieldname='enrolled' condition = '=' response='0' response_type='fixed' skiptofieldname ='comments'></skip>
+		</preskip>
+	</question>
+
+	<question type = 'text' fieldname = 'comments' fieldtype = 'text'>
+		<text>comments</text>
+		<maxCharacters>20</maxCharacters>
+		<optional></optional>
+	</question>
+
+	<question type = 'automatic' fieldname = 'uniqueid' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'swver' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'survey_id' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'lastmod' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'stoptime' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'information' fieldname = 'end_of_questions' fieldtype = 'n/a'>
+		<text>Press the 'Finish' button to save the data.</text >
+	</question>
+
+</survey>

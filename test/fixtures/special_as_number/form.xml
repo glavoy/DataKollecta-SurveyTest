@@ -1,13 +1,8 @@
 <?xml version = '1.0' encoding = 'utf-8'?>
 <!--
-  A form with a question no answer can get past.
-
-  `age` declares a range of 0..99 and a logic check on `age >= 0`. A logic
-  check fails when its condition is TRUE, so every value the range permits
-  trips it: the app's Next button is dead and the interviewer can neither
-  move on nor finish. Hand-written rather than generated, because no data
-  dictionary the generator accepts would produce it -- which is the point,
-  since this is what the runner's own gate has to detect.
+  `child_q` is skipped when age >= 18. A Don't-know age is stored as -7,
+  and -7 >= 18 is false, so that is fine -- but `adult_q`'s own guard below
+  routes -7 as a child: `age &lt; 18` is true for it.
 -->
 <survey>
 
@@ -18,18 +13,28 @@
 	</question>
 
 	<question type = 'text' fieldname = 'age' fieldtype = 'text_integer'>
-		<text>Age in completed years</text>
+		<text>age</text>
 		<maxCharacters>3</maxCharacters>
 		<numeric_check>
 			<values minvalue ='0' maxvalue='99' other_values = '0' message = 'Number must be between 0 and 99!'></values>
 		</numeric_check>
-		<logic_check message='This question can never be satisfied'>age &gt;= 0</logic_check>
+		<dont_know>-7</dont_know>
 	</question>
 
-	<question type = 'text' fieldname = 'comments' fieldtype = 'text'>
-		<text>Comments</text>
-		<maxCharacters>100</maxCharacters>
-		<optional></optional>
+	<question type = 'text' fieldname = 'child_q' fieldtype = 'text'>
+		<text>child_q</text>
+		<maxCharacters>20</maxCharacters>
+		<preskip>
+			<skip fieldname='age' condition = '&gt;=' response='18' response_type='fixed' skiptofieldname ='adult_q'></skip>
+		</preskip>
+	</question>
+
+	<question type = 'text' fieldname = 'adult_q' fieldtype = 'text'>
+		<text>adult_q</text>
+		<maxCharacters>20</maxCharacters>
+		<preskip>
+			<skip fieldname='age' condition = '&lt;' response='18' response_type='fixed' skiptofieldname ='end'></skip>
+		</preskip>
 	</question>
 
 	<question type = 'automatic' fieldname = 'uniqueid' fieldtype = 'text'>

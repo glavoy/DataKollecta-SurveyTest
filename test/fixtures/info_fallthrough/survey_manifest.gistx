@@ -1,20 +1,20 @@
 {
-  "surveyName": "Trap Logic",
-  "surveyId": "trap_logic",
-  "databaseName": "trap_logic.sqlite",
+  "surveyName": "Info Fallthrough",
+  "surveyId": "info_fallthrough",
+  "databaseName": "info_fallthrough.sqlite",
   "xmlFiles": [
-    "trap.xml"
+    "screening.xml"
   ],
   "crfs": [
     {
       "display_order": 10,
-      "tablename": "trap",
-      "displayname": "Trap",
+      "tablename": "screening",
+      "displayname": "Screening",
       "isbase": 1,
       "primarykey": "code",
       "display_fields": "code",
       "idconfig": {
-        "prefix": "T",
+        "prefix": "S",
         "fields": [],
         "incrementLength": 4
       }

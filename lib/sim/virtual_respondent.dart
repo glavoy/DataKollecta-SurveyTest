@@ -1,6 +1,11 @@
 import 'dart:math';
 
 import 'package:datakollecta/models/question.dart';
+import 'package:datakollecta/services/field_comparator.dart';
+import 'package:datakollecta/services/numeric_validation_service.dart';
+
+import 'mask.dart';
+import 'steering.dart';
 
 /// How a simulated interviewer chooses answers.
 enum RespondentStrategy {
@@ -55,12 +60,51 @@ class VirtualRespondent {
     this.optionalBlankRate = 0.2,
     this.specialResponseRate = 0.05,
     this.backtrackRate = 0.0,
+    this.targets = const {},
   }) : _random = Random(seed),
        _seed = seed;
 
   final Random _random;
   final int _seed;
   final RespondentStrategy strategy;
+
+  /// Table -> field -> what a steered interview needs that field to satisfy.
+  ///
+  /// A steered respondent answers a targeted field with the first value that
+  /// meets every constraint, once, on the first attempt at the question; if
+  /// a gate refuses that value it falls back to its strategy, so a steer can
+  /// never manufacture a `cannot_advance`. Whether the steer *worked* is not
+  /// decided here -- the engine's own skip observer says whether the rule
+  /// fired, and that is what the report reads.
+  final Map<String, Map<String, List<SteerConstraint>>> targets;
+
+  String _table = '';
+  final Set<String> _steeredOnce = {};
+
+  /// Fields steering chose a value for, and what it chose. Read by the
+  /// session so a failed steer can say what was tried.
+  final Map<String, Object?> steeredValues = {};
+
+  /// Fields where no candidate satisfied every constraint.
+  final Set<String> steerFailed = {};
+
+  /// Values not to give again: the runner went back to this question because
+  /// the answer it held closed the route ahead, and an interviewer who goes
+  /// back changes the answer rather than repeating it.
+  final Map<String, Set<String>> _avoid = {};
+
+  void avoid(String field, Object? value) {
+    final text = FieldComparator.resolveText(value);
+    if (text == null) return;
+    (_avoid[field] ??= {}).add(text);
+  }
+
+  /// Called by `FormRunner` when an interview on [table] begins, so
+  /// [targets] are read for the right form.
+  void enterForm(String table) {
+    _table = table;
+    _steeredOnce.clear();
+  }
 
   /// How often a question the dictionary marked optional is left blank. The
   /// one legitimate way a displayed question ends up NULL.
@@ -101,10 +145,182 @@ class VirtualRespondent {
     Question question, {
     required List<QuestionOption> options,
     List<SkipCondition> rulesTestingThis = const [],
+    Map<String, dynamic> answers = const {},
   }) {
-    final value = _choose(question, options, rulesTestingThis);
+    final constraints = targets[_table]?[question.fieldName];
+    if (constraints != null &&
+        constraints.isNotEmpty &&
+        _steeredOnce.add(question.fieldName)) {
+      final steered = _steer(question, options, constraints, answers);
+      if (steered != null) {
+        steeredValues[question.fieldName] = steered.value;
+        decisions.add(Decision(question.fieldName, steered.value, 'steered'));
+        return steered.value;
+      }
+      steerFailed.add(question.fieldName);
+    }
+
+    final avoided = _avoid[question.fieldName];
+    final usable = avoided == null
+        ? options
+        : options.where((o) => !avoided.contains(o.value)).toList();
+    // Only narrow the list when something is left to choose from.
+    final value = _choose(
+      question,
+      usable.isEmpty ? options : usable,
+      rulesTestingThis,
+    );
+    if (avoided != null && FieldComparator.resolveText(value) != null &&
+        avoided.contains(FieldComparator.resolveText(value)) &&
+        usable.isNotEmpty) {
+      // A strategy that ignores the option list (numeric, free text) may
+      // still repeat itself; a second draw is cheap and usually enough.
+      final again = _choose(question, usable, rulesTestingThis);
+      decisions.add(Decision(question.fieldName, again, '${strategy.name}, changed'));
+      return again;
+    }
     decisions.add(Decision(question.fieldName, value, strategy.name));
     return value;
+  }
+
+  /// The first candidate answer that satisfies every constraint, or null.
+  ///
+  /// Candidates are what an interviewer could actually enter for this
+  /// question -- its options, values inside its range, its Don't-know and
+  /// Refuse codes, a blank only where the question is optional -- and each is
+  /// judged through `FieldComparator`, the app's own comparison. A blank is
+  /// tried last: it satisfies a "must not fire" constraint only by the
+  /// fail-open rule, and a value that keeps the rule from firing on its
+  /// merits is a stronger test.
+  _Steered? _steer(
+    Question question,
+    List<QuestionOption> options,
+    List<SteerConstraint> constraints,
+    Map<String, dynamic> answers,
+  ) {
+    for (final candidate in _steerCandidates(question, options, constraints)) {
+      if (constraints.every((c) => c.satisfiedBy(candidate, answers))) {
+        return _Steered(candidate);
+      }
+    }
+    if (question.optional &&
+        constraints.every((c) => c.satisfiedBy(null, answers))) {
+      return const _Steered(null);
+    }
+    return null;
+  }
+
+  Iterable<Object?> _steerCandidates(
+    Question question,
+    List<QuestionOption> options,
+    List<SteerConstraint> constraints,
+  ) sync* {
+    final specials = <String>[
+      if (question.dontKnow != null && question.dontKnow!.isNotEmpty)
+        question.dontKnow!,
+      if (question.refuse != null && question.refuse!.isNotEmpty)
+        question.refuse!,
+    ];
+    final literals = [
+      for (final c in constraints)
+        if (!c.isDynamic) c.response,
+    ];
+
+    switch (question.type) {
+      case QuestionType.radio:
+      case QuestionType.combobox:
+        // The loader has already appended Don't-know/Refuse to a static list.
+        for (final o in options) {
+          yield o.value;
+        }
+        for (final s in specials) {
+          if (!options.any((o) => o.value == s)) yield s;
+        }
+        return;
+
+      case QuestionType.checkbox:
+        for (final o in options) {
+          yield [o.value];
+        }
+        if (options.length > 1) {
+          yield [for (final o in options) o.value];
+          for (final o in options) {
+            yield [for (final other in options) if (other != o) other.value];
+          }
+        }
+        for (final s in specials) {
+          yield [s];
+        }
+        return;
+
+      case QuestionType.date:
+      case QuestionType.datetime:
+        final min =
+            question.minDate ??
+            DateTime.now().subtract(const Duration(days: 36500));
+        final max = question.maxDate ?? DateTime.now();
+        final span = max.difference(min).inDays;
+        yield min;
+        yield max;
+        if (span > 1) yield min.add(Duration(days: span ~/ 2));
+        for (final lit in literals) {
+          final d = DateTime.tryParse(lit);
+          if (d == null) continue;
+          for (final v in [d, d.subtract(const Duration(days: 1)), d.add(const Duration(days: 1))]) {
+            if (!v.isBefore(min) && !v.isAfter(max)) yield v;
+          }
+        }
+        for (final s in specials) {
+          yield s;
+        }
+        return;
+
+      case QuestionType.text:
+        final check = question.numericCheck;
+        final isNumeric =
+            question.fieldType == 'text_integer' ||
+            question.fieldType == 'text_decimal' ||
+            check != null;
+        if (isNumeric) {
+          final min = (check?.minValue ?? 0).toInt();
+          final max = (check?.maxValue ?? (min + 100)).toInt();
+          final candidates = <int>{
+            min,
+            min + 1,
+            (min + max) ~/ 2,
+            max - 1,
+            max,
+            for (final lit in literals) ...[
+              if (int.tryParse(lit) != null) ...[
+                int.parse(lit),
+                int.parse(lit) - 1,
+                int.parse(lit) + 1,
+              ],
+            ],
+          }.where((v) => v >= min && v <= max).where(
+                (v) => check == null || NumericValidationService.isWithinRange(check, v),
+              );
+          for (final v in candidates) {
+            yield question.fieldType == 'text_decimal' ? '$v.0' : _pad(question, '$v');
+          }
+          for (final s in specials) {
+            yield s;
+          }
+          return;
+        }
+        // Free text: the literal itself makes an equality fire; a word that
+        // is not any literal makes it not fire.
+        for (final lit in literals) {
+          yield _cap(question, lit);
+        }
+        yield _cap(question, _freeTextValue(question));
+        yield _cap(question, 'zz');
+        return;
+
+      case QuestionType.information:
+      case QuestionType.automatic:
+        return;
+    }
   }
 
   /// A deliberately conservative answer: the one most likely to satisfy the
@@ -316,30 +532,11 @@ class VirtualRespondent {
     return matching[_random.nextInt(matching.length)].value;
   }
 
-  bool _wouldFire(SkipCondition rule, String candidate) {
-    final expected = rule.response;
-    final left = num.tryParse(candidate);
-    final right = num.tryParse(expected);
-    final numeric = left != null && right != null;
-
-    switch (rule.condition) {
-      case '=':
-        return numeric ? left == right : candidate == expected;
-      case '<>':
-      case '!=':
-        return numeric ? left != right : candidate != expected;
-      case '>':
-        return numeric && left > right;
-      case '>=':
-        return numeric && left >= right;
-      case '<':
-        return numeric && left < right;
-      case '<=':
-        return numeric && left <= right;
-      default:
-        return false;
-    }
-  }
+  /// Whether [candidate] would make [rule] fire -- through the app's own
+  /// comparator, so a `contains` rule on a checkbox and an entity-encoded
+  /// operator behave here exactly as they do in the field.
+  bool _wouldFire(SkipCondition rule, String candidate) =>
+      FieldComparator.compare(candidate, rule.condition, rule.response);
 
   /// A checkbox stores a list. "Don't know"/"Refuse"/"Not in this list" are
   /// mutually exclusive with real choices, which is how the widget behaves.
@@ -513,14 +710,13 @@ class VirtualRespondent {
   /// exactly what the real input field would accept), anything else is a
   /// literal carried through unchanged.
   static const _maskAlphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  static final _maskSlots = RegExp(r'\[([^\]]+)\]|([^\[]+)');
 
   String _maskedValue(String mask) {
     final buffer = StringBuffer();
-    for (final slot in _maskSlots.allMatches(mask)) {
-      final charClass = slot.group(1);
+    for (final slot in Mask(mask).slots) {
+      final charClass = slot.charClass;
       if (charClass == null) {
-        buffer.write(slot.group(2));
+        buffer.write(slot.literal);
         continue;
       }
       final pattern = RegExp('[$charClass]');
@@ -543,4 +739,10 @@ class VirtualRespondent {
     if (int.tryParse(value) == null) return value;
     return value.padLeft(max, '0');
   }
+}
+
+/// A steering result that distinguishes "chose a blank" from "found nothing".
+class _Steered {
+  const _Steered(this.value);
+  final Object? value;
 }

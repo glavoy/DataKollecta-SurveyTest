@@ -14,7 +14,8 @@ class ReportView extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final groups = report.groupedFindings;
+    final design = report.designGroups;
+    final engine = report.engineGroups;
 
     return Card(
       child: Padding(
@@ -25,15 +26,15 @@ class ReportView extends StatelessWidget {
             Row(
               children: [
                 Icon(
-                  report.clean ? Icons.check_circle : Icons.error,
-                  color: report.clean ? Colors.green.shade700 : scheme.error,
+                  report.designClean ? Icons.check_circle : Icons.error,
+                  color: report.designClean ? Colors.green.shade700 : scheme.error,
                 ),
                 const SizedBox(width: 10),
                 Text(
-                  report.clean
-                      ? 'No problems found'
-                      : '${groups.length} problem(s) found '
-                            '(${report.findings.length} occurrence(s))',
+                  report.designClean
+                      ? 'No problems found in the dictionary'
+                      : '${design.length} design problem(s) in the dictionary '
+                            '(${report.designFindings.length} occurrence(s))',
                   style: theme.textTheme.titleMedium,
                 ),
               ],
@@ -45,20 +46,7 @@ class ReportView extends StatelessWidget {
               style: theme.textTheme.bodySmall,
             ),
 
-            if (groups.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              for (final group in groups.take(50)) _FindingTile(group: group),
-              if (groups.length > 50)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    '… and ${groups.length - 50} more',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ),
-            ],
-
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             Text('Coverage', style: theme.textTheme.titleMedium),
             const SizedBox(height: 4),
             Text(
@@ -77,10 +65,6 @@ class ReportView extends StatelessWidget {
                       'of ${report.questionsDeclared.length}',
                 ),
                 _Stat('Never reached', '${report.neverReached.length}'),
-                _Stat(
-                  'Reached but never answered',
-                  '${report.neverAnswered.length}',
-                ),
                 _Stat(
                   'Skips exercised both ways',
                   '${report.skipsFired.intersection(report.skipsNotFired).length} '
@@ -105,6 +89,81 @@ class ReportView extends StatelessWidget {
                 entries: (report.neverReached.toList()..sort())
                     .take(30)
                     .toList(),
+              ),
+            ],
+
+
+            if (design.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              for (final group in design.take(50)) _FindingTile(group: group),
+              if (design.length > 50)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    '… and ${design.length - 50} more',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
+            ],
+
+            if (engine.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              ExpansionTile(
+                initiallyExpanded: false,
+                tilePadding: EdgeInsets.zero,
+                title: Text(
+                  'Engine-integrity problems (${engine.length})',
+                  style: theme.textTheme.titleSmall,
+                ),
+                subtitle: Text(
+                  'About the field app, not the dictionary: a value stored '
+                  'changed, a key duplicated, a timestamp out of order. For '
+                  'whoever maintains the app.',
+                  style: theme.textTheme.bodySmall,
+                ),
+                children: [
+                  for (final group in engine.take(50)) _FindingTile(group: group),
+                ],
+              ),
+            ],
+
+            if (report.decisions.values.any((t) => t.nextAfter.isNotEmpty)) ...[
+              const SizedBox(height: 20),
+              Text('Skip decisions', style: theme.textTheme.titleMedium),
+              const SizedBox(height: 4),
+              Text(
+                'After each answer, the next question shown. Read against the '
+                'questionnaire; the full tables are in the saved report.',
+                style: theme.textTheme.bodySmall,
+              ),
+              const SizedBox(height: 6),
+              for (final table in report.decisions.values)
+                if (table.nextAfter.isNotEmpty)
+                  _Section(
+                    title: table.table,
+                    subtitle: '',
+                    entries: [
+                      for (final field in (table.nextAfter.keys.toList()..sort()))
+                        '$field: ${table.nextAfter[field]!.values.map((v) {
+                          final nexts = table.nextAfter[field]!.counts[v]!.entries.toList()
+                            ..sort((a, b) => b.value.compareTo(a.value));
+                          return '$v → ${nexts.map((n) => '${n.key} (${n.value})').join(', ')}';
+                        }).join('   |   ')}',
+                    ],
+                  ),
+            ],
+
+            if (report.steering.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _Section(
+                title: 'Steered interviews',
+                subtitle:
+                    'One per skip rule to make it fire, one to keep it from '
+                    'firing, one per question never reached. '
+                    '${report.steering.where((o) => o.achieved).length} of '
+                    '${report.steering.length} did what they set out to; the '
+                    'rest are reflected in the findings.',
+                entries: const [],
               ),
             ],
 
@@ -158,8 +217,8 @@ class ReportView extends StatelessWidget {
               _Section(
                 title: 'Reached but never answered',
                 subtitle:
-                    'Displayed and always left blank. Normal for '
-                    'optional questions and information screens.',
+                    'Displayed and always left blank. Normal for optional '
+                    'questions; information screens are not listed.',
                 entries: report.neverAnswered.take(20).toList(),
               ),
             ],

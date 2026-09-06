@@ -1,0 +1,54 @@
+<?xml version = '1.0' encoding = 'utf-8'?>
+<!--
+  A <skip> with no fieldname. The loader drops it without a word, so the
+  dictionary shows a rule the field does not have.
+-->
+<survey>
+
+	<question type = 'automatic' fieldname = 'starttime' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'code' fieldtype = 'text'>
+	</question>
+
+	<question type = 'radio' fieldname = 'yes' fieldtype = 'integer'>
+		<text>yes</text>
+		<responses>
+			<response value = '1'>Option 1</response>
+			<response value = '0'>Option 0</response>
+		</responses>
+		<postskip>
+			<skip condition = '=' response='1' response_type='fixed' skiptofieldname ='after'></skip>
+		</postskip>
+	</question>
+
+	<question type = 'text' fieldname = 'middle' fieldtype = 'text'>
+		<text>middle</text>
+		<maxCharacters>20</maxCharacters>
+	</question>
+
+	<question type = 'text' fieldname = 'after' fieldtype = 'text'>
+		<text>after</text>
+		<maxCharacters>20</maxCharacters>
+	</question>
+
+	<question type = 'automatic' fieldname = 'uniqueid' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'swver' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'survey_id' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'lastmod' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'stoptime' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'information' fieldname = 'end_of_questions' fieldtype = 'n/a'>
+		<text>Press the 'Finish' button to save the data.</text >
+	</question>
+
+</survey>

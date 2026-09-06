@@ -43,7 +43,7 @@
 	<question type = 'text' fieldname = 'participant_id' fieldtype = 'text'>
 		<text>Participant ID</text>
 		<maxCharacters>=7</maxCharacters>
-		<mask value="OP-[0-9][0-9][0-9][0-9][0-9][0-9][0-9]" />
+		<mask value="OP-[0-9][0-9][0-9][0-9]" />
 		<unique_check>
 			<message>This will cause duplicates</message>
 		</unique_check>

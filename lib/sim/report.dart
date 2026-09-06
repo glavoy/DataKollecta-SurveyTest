@@ -1,10 +1,12 @@
 import 'dart:math';
 
 import 'package:datakollecta/models/question.dart';
-import 'package:datakollecta/services/survey_loader.dart';
 
-import 'form_runner.dart';
+import 'decision_table.dart';
+import 'logic_tally.dart';
 import 'scenario_runner.dart';
+import 'skip_topology.dart';
+import 'steering.dart';
 
 /// A finding's [Finding.detail] is a message built for one occurrence: it
 /// carries the uniqueid, timestamp, or answered value that happened to be
@@ -48,14 +50,22 @@ class Finding {
   final int? seed;
 
   String get where => field == null ? table : '$table.$field';
+  FindingTier get tier => tierOf(code);
 }
 
-/// Read-me-first order for the report. Everything here is a problem; these
-/// differ in how likely a designer is to be able to act on one.
-const List<String> _codeOrder = [
-  'cannot_advance',
-  'question_never_reached',
-  'form_never_entered',
+/// Who a finding is for.
+///
+/// A *design* finding is about the dictionary: a question nobody can reach,
+/// a skip that routes Don't know the wrong way, a csv that leaves a list
+/// empty. The designer fixes it in Excel and regenerates. An *engine* finding
+/// is about the field app doing something wrong with a valid package: an
+/// answer stored changed, a duplicate key, a timestamp out of order. Nothing
+/// in the dictionary causes those, and the designer cannot fix them -- they
+/// are for whoever maintains the app, and they exist here because this is the
+/// only place the real save and repeat path runs outside a widget.
+enum FindingTier { design, engine }
+
+const Set<String> _engineCodes = {
   'save_failed',
   'record_missing',
   'duplicate_primary_key',
@@ -65,10 +75,66 @@ const List<String> _codeOrder = [
   'stoptime_before_starttime',
   'missing_starttime',
   'repeat_livelock',
+  'child_link_missing',
+};
+
+FindingTier tierOf(String code) =>
+    _engineCodes.contains(code) ? FindingTier.engine : FindingTier.design;
+
+/// Read-me-first order for the report. Everything here is a problem; these
+/// differ in how likely a designer is to be able to act on one. Design
+/// findings first, most actionable first; then the engine tier.
+const List<String> _codeOrder = [
+  // The dictionary is wrong.
+  'cannot_advance',
+  'question_never_reached',
+  'form_never_entered',
+  'information_screen_fell_through',
+  'skip_domain_gap',
+  'special_code_routed_as_value',
+  'skip_dropped_by_parser',
+  'logic_check_malformed',
+  'logic_check_inert',
+  'csv_file_missing',
+  'csv_empty',
+  'csv_cascade_empty',
+  'unanswerable',
   'skip_rule_always_fired',
   'skip_rule_never_evaluated',
   'skip_rule_never_fired',
+  // The engine did something wrong with a valid package.
+  'save_failed',
+  'record_missing',
+  'duplicate_primary_key',
+  'degraded_key',
+  'answer_changed',
+  'value_never_asked',
+  'stoptime_before_starttime',
+  'missing_starttime',
+  'repeat_livelock',
+  'child_link_missing',
 ];
+
+/// Codes whose findings describe the whole batch rather than one interview,
+/// and so carry no seed to replay: nothing a single run did produced them.
+const Set<String> _batchLevelCodes = {
+  'question_never_reached',
+  'form_never_entered',
+  'information_screen_fell_through',
+  'skip_rule_always_fired',
+  'skip_rule_never_evaluated',
+  'skip_rule_never_fired',
+  'logic_check_inert',
+  'skip_domain_gap',
+  'special_code_routed_as_value',
+  'skip_dropped_by_parser',
+  'logic_check_malformed',
+  'csv_file_missing',
+  'csv_empty',
+  'csv_cascade_empty',
+};
+
+bool isBatchLevel(String code) => _batchLevelCodes.contains(code);
 
 int _codeRank(String code) {
   final index = _codeOrder.indexOf(code);
@@ -99,6 +165,7 @@ class FindingGroup {
   final List<int> seeds;
 
   String get where => field == null ? table : '$table.$field';
+  FindingTier get tier => tierOf(code);
 }
 
 /// What a run found, in the shape the screens display.
@@ -117,12 +184,43 @@ class RunReport {
     required this.unanswerable,
     required this.deadEnds,
     required this.repeatCells,
+    required this.steering,
+    required this.decisions,
+    required this.logicChecks,
+    required this.oneOffs,
+    required this.informationQuestions,
     required this.elapsed,
   });
 
   final int runs;
   final int records;
   final List<Finding> findings;
+
+  /// Every steered interview, and whether it proved what it set out to.
+  final List<SteeringOutcome> steering;
+
+  /// Per form: where each answer led, and what each question was shown or
+  /// skipped under. The tables a designer reads against the questionnaire.
+  final Map<String, SkipDecisionTable> decisions;
+
+  /// Every declared logic check -> what the interviews did with it.
+  final Map<String, LogicTally> logicChecks;
+
+  /// Manually-entered child forms -> how many parents qualified and were
+  /// followed up.
+  final Map<String, OneOffTally> oneOffs;
+
+  /// `information` screens across every form. They display text and store
+  /// nothing, so "reached but never answered" is their normal state and a
+  /// postskip that always fires on one is the design, not a gap.
+  final Set<String> informationQuestions;
+
+  /// Checks evaluated at least once that never blocked anybody. Not a
+  /// finding: a random respondent rarely trips a cross-field check.
+  Set<String> get logicNeverFired => {
+        for (final e in logicChecks.entries)
+          if (e.value.evaluated > 0 && e.value.fired == 0) e.key,
+      };
 
   /// Every question the package declares that an interviewer could be shown
   /// -- `automatic` fields and the end-of-survey screen excluded, since
@@ -165,8 +263,24 @@ class RunReport {
 
   bool get clean => findings.isEmpty;
 
-  /// Questions reached but never given a value on any run.
-  Set<String> get neverAnswered => questionsSeen.difference(questionsAnswered);
+  /// No design finding: the dictionary itself came through clean. Engine
+  /// findings may still be present; they are somebody else's to fix.
+  bool get designClean => designFindings.isEmpty;
+
+  List<Finding> get designFindings =>
+      [for (final f in findings) if (f.tier == FindingTier.design) f];
+  List<Finding> get engineFindings =>
+      [for (final f in findings) if (f.tier == FindingTier.engine) f];
+
+  List<FindingGroup> get designGroups =>
+      [for (final g in groupedFindings) if (g.tier == FindingTier.design) g];
+  List<FindingGroup> get engineGroups =>
+      [for (final g in groupedFindings) if (g.tier == FindingTier.engine) g];
+
+  /// Questions reached but never given a value on any run. Information
+  /// screens are excluded: they have no value to give.
+  Set<String> get neverAnswered =>
+      questionsSeen.difference(questionsAnswered).difference(informationQuestions);
 
   /// Questions no interview ever reached. On a run of any size this is the
   /// headline coverage number: a question here was not tested, and if the
@@ -210,11 +324,22 @@ class RunReport {
     // reporting, and on a form with eighty branches there is a lot of it --
     // enough to bury a question nobody can reach if it sorted by count alone.
     groups.sort((a, b) {
+      final tier = a.tier.index.compareTo(b.tier.index);
+      if (tier != 0) return tier;
       final rank = _codeRank(a.code).compareTo(_codeRank(b.code));
       return rank != 0 ? rank : b.count.compareTo(a.count);
     });
     return groups;
   }
+}
+
+/// How often a manually-entered child form was called for, and done.
+class OneOffTally {
+  OneOffTally(this.condition);
+  final String condition;
+  int parents = 0;
+  int qualified = 0;
+  int entered = 0;
 }
 
 /// Accumulates what a batch of scenarios did.
@@ -228,9 +353,18 @@ class ReportBuilder {
   final Map<String, Set<String>> _declaredRules = {};
   final Map<String, String> _ruleTable = {};
 
+  /// The skip structure of every declared form, by table.
+  final Map<String, SkipTopology> _topologies = {};
+  final Map<String, DecisionTableBuilder> _decisions = {};
+  final Map<String, LogicTally> _logic = {};
+  final Map<String, String> _logicTable = {};
+  final Map<String, OneOffTally> _oneOffs = {};
+
   /// Which rules jump over which question, so a never-reached question can
   /// name the rules that closed the route to it. Keyed by field name.
   final Map<String, Set<String>> _rulesJumpingOver = {};
+
+  SkipTopology? topologyOf(String table) => _topologies[table];
 
   final Set<String> _formsRun = {};
 
@@ -247,11 +381,39 @@ class ReportBuilder {
   final Map<String, int> _unanswerable = {};
   final Map<String, int> _deadEnds = {};
   final Set<String> _cells = {};
+  final List<SteeringOutcome> _steering = [];
   int _runs = 0;
   int _records = 0;
   final Stopwatch _clock = Stopwatch()..start();
 
   void add(Finding finding) => _findings.add(finding);
+
+  bool wasSeen(String field) => _seen.contains(field);
+
+  void observeSteering(SteeringOutcome outcome) => _steering.add(outcome);
+
+  /// The steered attempts at [subject] with [purpose], if any ran.
+  Iterable<SteeringOutcome> _steeringFor(String subject, SteerPurpose purpose) =>
+      _steering.where((o) => o.subject == subject && o.purpose == purpose);
+
+  /// How a steered attempt failed, phrased for a finding; empty when no
+  /// attempt was made.
+  String _steeringNote(String subject, SteerPurpose purpose) {
+    final attempts = _steeringFor(subject, purpose).toList();
+    if (attempts.isEmpty) return '';
+    final infeasible = attempts.where((a) => a.seed == null).toList();
+    if (infeasible.isNotEmpty) {
+      return ' Steering could not even try: ${infeasible.first.reason}.';
+    }
+    final tried = attempts
+        .map((a) => a.plan.describeValues(a.valuesChosen))
+        .where((s) => s.isNotEmpty)
+        .toSet()
+        .join(' / ');
+    final reason = attempts.map((a) => a.reason).where((r) => r.isNotEmpty).toSet().join('; ');
+    return ' A steered interview tried ${tried.isEmpty ? 'the obvious answers' : tried}'
+        '${reason.isEmpty ? '' : ' and $reason'}.';
+  }
 
   /// Records what one form contains, before any interview runs against it.
   ///
@@ -269,36 +431,34 @@ class ReportBuilder {
     bool reachable = true,
   }) {
     if (!reachable) _unreachableForms.add(table);
-    final fields = _declaredQuestions[table] ??= {};
+    final topology = SkipTopology.of(table, questions);
+    _topologies[table] = topology;
+    _decisions[table] = DecisionTableBuilder(topology);
+
+    (_declaredQuestions[table] ??= {}).addAll(topology.displayable);
+    for (final q in questions) {
+      for (var i = 0; i < q.logicChecks.length; i++) {
+        final id = LogicTally.idFor(table, q.fieldName, i, q.logicChecks[i].condition);
+        _logic.putIfAbsent(id, LogicTally.new);
+        _logicTable[id] = table;
+      }
+    }
     final rules = _declaredRules[table] ??= {};
+    for (final rule in topology.rules) {
+      rules.add(rule.id);
+      _ruleTable[rule.id] = table;
+    }
 
-    for (var i = 0; i < questions.length; i++) {
-      final q = questions[i];
-      if (q.type != QuestionType.automatic &&
-          q.fieldName != SurveyLoader.endOfQuestionsField) {
-        fields.add(q.fieldName);
-      }
-
-      for (final kind in const ['preskip', 'postskip']) {
-        final list = kind == 'preskip' ? q.preSkips : q.postSkips;
-        for (var order = 0; order < list.length; order++) {
-          final id = FormRunner.skipRuleId(table, q, kind, order);
-          rules.add(id);
-          _ruleTable[id] = table;
-
-          // A preskip jumps from its own question; a postskip from the one
-          // after. Everything in between is a question this rule can close
-          // the route to -- which is what lets a never-reached finding name
-          // the rules responsible instead of just stating the fact.
-          final target = questions.indexWhere(
-            (other) => other.fieldName == list[order].skipToFieldName,
-          );
-          if (target <= i) continue;
-          for (var k = kind == 'preskip' ? i : i + 1; k < target; k++) {
-            (_rulesJumpingOver[questions[k].fieldName] ??= {}).add(id);
-          }
-        }
-      }
+    // A preskip jumps from its own question; a postskip from the one after.
+    // Everything in between is a question this rule can close the route to
+    // -- which is what lets a never-reached finding name the rules
+    // responsible instead of just stating the fact. `SkipTopology` also
+    // resolves the reserved target `end`, which a plain `indexWhere` on
+    // fieldnames used to miss: a rule that skipped to the end of the form
+    // was recorded here as jumping over nothing.
+    for (final entry in topology.rulesJumpingOver.entries) {
+      (_rulesJumpingOver[entry.key] ??= {})
+          .addAll(entry.value.map((r) => r.id));
     }
   }
 
@@ -309,6 +469,10 @@ class ReportBuilder {
     for (final run in [scenario.parent, ...scenario.children]) {
       _formsRun.add(run.tableName);
       _seen.addAll(run.route);
+      _decisions[run.tableName]?.observe(run);
+      for (final e in run.logicTallies.entries) {
+        (_logic[e.key] ??= LogicTally()).merge(e.value);
+      }
       for (final entry in run.storedRow.entries) {
         if (entry.value != null && '${entry.value}'.isNotEmpty) {
           _answered.add(entry.key);
@@ -319,6 +483,18 @@ class ReportBuilder {
       }
       for (final field in run.unanswerable) {
         _unanswerable.update(field, (v) => v + 1, ifAbsent: () => 1);
+        _findings.add(
+          Finding(
+            code: 'unanswerable',
+            table: run.tableName,
+            field: field,
+            seed: seed,
+            detail:
+                'had nothing to select: the csv or database filter matched no '
+                'rows for the answers given, so the interviewer sees an empty '
+                'list.',
+          ),
+        );
       }
       for (final field in run.deadEndRoutes) {
         _deadEnds.update(field, (v) => v + 1, ifAbsent: () => 1);
@@ -353,6 +529,12 @@ class ReportBuilder {
     for (final repeat in scenario.repeats) {
       _cells.add('${repeat.autoStartRepeat}/${repeat.enforceMode}');
     }
+    for (final oneOff in scenario.oneOffs) {
+      final tally = _oneOffs[oneOff.childTable] ??= OneOffTally(oneOff.entryCondition);
+      tally.parents++;
+      if (oneOff.qualified) tally.qualified++;
+      if (oneOff.entered) tally.entered++;
+    }
 
     if (scenario.livelocked) {
       _findings.add(
@@ -381,11 +563,19 @@ class ReportBuilder {
       for (final fields in _declaredQuestions.values) ...fields,
     };
     final declaredRules = {for (final ids in _declaredRules.values) ...ids};
+    final decisions = {
+      for (final entry in _decisions.entries) entry.key: entry.value.build(),
+    };
 
     final report = RunReport(
       runs: _runs,
       records: _records,
-      findings: List.unmodifiable([..._findings, ..._coverageFindings()]),
+      findings: List.unmodifiable([
+        ..._findings,
+        ..._coverageFindings(),
+        ..._fallThroughFindings(decisions),
+        ..._inertLogicFindings(),
+      ]),
       questionsDeclared: Set.unmodifiable(declaredQuestions),
       questionsSeen: Set.unmodifiable(_seen),
       questionsAnswered: Set.unmodifiable(_answered),
@@ -396,6 +586,13 @@ class ReportBuilder {
       unanswerable: Map.unmodifiable(_unanswerable),
       deadEnds: Map.unmodifiable(_deadEnds),
       repeatCells: Set.unmodifiable(_cells),
+      steering: List.unmodifiable(_steering),
+      decisions: Map.unmodifiable(decisions),
+      logicChecks: Map.unmodifiable(_logic),
+      oneOffs: Map.unmodifiable(_oneOffs),
+      informationQuestions: {
+        for (final t in _topologies.values) ...t.informationQuestions,
+      },
       elapsed: _clock.elapsed,
     );
     return report;
@@ -417,12 +614,16 @@ class ReportBuilder {
             code: 'form_never_entered',
             table: table,
             detail: _unreachableForms.contains(table)
-                ? 'not tested. This app drives the base form and the repeat '
-                      'loop, and this form is entered another way -- so this '
-                      'is a gap in the harness, not in the package.'
-                : 'no interview ever opened this form, so nothing in it was '
-                      'tested. Either its parent never triggered it, or its '
-                      'entry condition can never be met.',
+                ? 'not tested. This app drives the base form and its child '
+                      'forms, and this form is none of those -- so this is a '
+                      'gap in the harness, not in the package.'
+                : _oneOffs.containsKey(table)
+                    ? 'no parent met its entry condition '
+                          '(${_oneOffs[table]!.condition}) in $_runs interview(s), '
+                          'so it was never opened and nothing in it was tested.'
+                    : 'no interview ever opened this form, so nothing in it was '
+                          'tested. Either its parent never triggered it, or its '
+                          'entry condition can never be met.',
           ),
         );
         continue;
@@ -436,7 +637,8 @@ class ReportBuilder {
             table: table,
             field: field,
             detail: 'not reached by any of $_runs interview(s).'
-                '${_whyUnreachable(field)}',
+                '${_whyUnreachable(field)}'
+                '${_steeringNote(field, SteerPurpose.reach)}',
           ),
         );
       }
@@ -464,10 +666,22 @@ class ReportBuilder {
             detail:
                 'never evaluated. Either the question carrying it was never '
                 'reached, or an earlier rule in the same cell always matches '
-                'first and this one sits behind it.',
+                'first and this one sits behind it.'
+                '${_steeringNote(id, SteerPurpose.fire)}',
           ),
         );
       } else if (fired && !_notFired.contains(id)) {
+        // A postskip on an information screen that always fires is the
+        // screen doing its job: the screen is shown only on the branch its
+        // own preskips leave open, and the postskip carries that branch on.
+        // The rule is still counted in the coverage summary; it is not a
+        // problem to report.
+        final rule = _topologies[table]?.rule(id);
+        if (rule != null &&
+            !rule.isPreskip &&
+            (_topologies[table]?.informationQuestions.contains(rule.owner) ?? false)) {
+          continue;
+        }
         findings.add(
           Finding(
             code: 'skip_rule_always_fired',
@@ -475,7 +689,8 @@ class ReportBuilder {
             field: name,
             detail:
                 'fired every time it was evaluated, so the questions it '
-                'jumps over were never asked on any route through this rule.',
+                'jumps over were never asked on any route through this rule.'
+                '${_steeringNote(id, SteerPurpose.notFire)}',
           ),
         );
       } else if (!fired) {
@@ -486,12 +701,84 @@ class ReportBuilder {
             field: name,
             detail:
                 'evaluated but never true, so the branch it guards was never '
-                'taken.',
+                'taken.${_steeringNote(id, SteerPurpose.fire)}',
           ),
         );
       }
     }
 
+    return findings;
+  }
+
+  /// An information screen with postskips is a terminal screen -- "not
+  /// eligible, thank them and stop" -- and its postskips are meant to carry
+  /// every route past the questions that follow. One that was fallen through
+  /// asked the rest of the form of someone it had just declared finished.
+  List<Finding> _fallThroughFindings(Map<String, SkipDecisionTable> decisions) {
+    final findings = <Finding>[];
+    for (final table in decisions.values) {
+      for (final screen in table.informationScreens) {
+        final n = table.fallThrough[screen] ?? 0;
+        if (n == 0) continue;
+        final values = (table.fallThroughValues[screen] ?? const {}).entries.toList()
+          ..sort((a, b) => b.value.compareTo(a.value));
+        final seen = values.map((e) => '${e.key} ×${e.value}').take(6).join(', ');
+        findings.add(
+          Finding(
+            code: 'information_screen_fell_through',
+            table: table.table,
+            field: screen,
+            detail:
+                'an information screen with postskips is a terminal screen, '
+                'but on $n interview-hop(s) none of its postskips fired and the '
+                'interview carried on to the next question in sequence. '
+                'Values of the tested fields when it happened: $seen.',
+          ),
+        );
+      }
+    }
+    return findings;
+  }
+
+  /// A check that compares against a field skipped on every route to it.
+  ///
+  /// The engine passes a check whose operand is blank, so such a check never
+  /// fires -- and when the blank field is one a skip rule jumps over, that is
+  /// the form's own doing rather than a respondent's. The designer probably
+  /// meant the check for a route the skips no longer allow.
+  List<Finding> _inertLogicFindings() {
+    if (_runs == 0) return const [];
+    final findings = <Finding>[];
+    for (final entry in _logic.entries) {
+      final tally = entry.value;
+      if (tally.evaluated == 0 || tally.nullOperand < tally.evaluated) continue;
+      final table = _logicTable[entry.key] ?? '';
+      final topology = _topologies[table];
+      if (topology == null) continue;
+      final skipped = tally.nullFields.keys
+          .where((f) => (topology.rulesJumpingOver[f] ?? const []).isNotEmpty)
+          .toList();
+      if (skipped.isEmpty) continue;
+      final rules = {
+        for (final f in skipped)
+          for (final r in topology.rulesJumpingOver[f]!) r.nameIn(table).split(' ').first,
+      };
+      final name = entry.key.startsWith('$table.')
+          ? entry.key.substring(table.length + 1)
+          : entry.key;
+      findings.add(
+        Finding(
+          code: 'logic_check_inert',
+          table: table,
+          field: name,
+          detail:
+              'was evaluated ${tally.evaluated} time(s) and every time '
+              '${skipped.join(', ')} was blank -- skipped by ${rules.join(', ')} '
+              'on every route that reaches this check. A blank operand passes, '
+              'so the check can never fire.',
+        ),
+      );
+    }
     return findings;
   }
 

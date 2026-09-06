@@ -1,0 +1,45 @@
+<?xml version = '1.0' encoding = 'utf-8'?>
+<!--
+  A child the interviewer opens by hand: a parent, a linking field, an entry
+  condition, and no repeat configuration. Every enrolled household gets one;
+  `hhid` must arrive filled from the parent without anyone typing it.
+-->
+<survey>
+
+	<question type = 'automatic' fieldname = 'starttime' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'hhid' fieldtype = 'text'>
+	</question>
+
+	<question type = 'radio' fieldname = 'visited' fieldtype = 'integer'>
+		<text>Was the household visited again?</text>
+		<responses>
+			<response value = '1'>Yes</response>
+			<response value = '0'>No</response>
+		</responses>
+	</question>
+
+	<question type = 'automatic' fieldname = 'uniqueid' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'parent_uniqueid' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'swver' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'survey_id' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'lastmod' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'stoptime' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'information' fieldname = 'end_of_questions' fieldtype = 'n/a'>
+		<text>Press the 'Finish' button to save the data.</text >
+	</question>
+
+</survey>

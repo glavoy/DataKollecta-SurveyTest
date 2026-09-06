@@ -12,13 +12,50 @@ import 'package:datakollecta/services/csv_data_service.dart';
 import 'package:datakollecta/services/database_response_service.dart';
 import 'package:datakollecta/services/db_service.dart';
 import 'package:datakollecta/services/logic_service.dart';
-import 'package:datakollecta/services/skip_service.dart';
 import 'package:datakollecta/services/survey_config_service.dart';
 import 'package:datakollecta/services/survey_loader.dart';
 import 'package:datakollecta/services/survey_navigation_service.dart';
 import 'package:path/path.dart' as p;
 
+import 'logic_tally.dart';
+import 'skip_topology.dart';
 import 'virtual_respondent.dart';
+
+/// One forward move of the interview: from a displayed question (or the
+/// start of the form) to the next question displayed.
+///
+/// Everything the decision table knows comes from these. [fromValue] is the
+/// answer at the moment of advancing; [firedRuleIds] is every rule the engine
+/// reported firing on the way, so what closed the route to each question in
+/// between is a fact the engine stated, not one inferred here; [gating] is a
+/// snapshot of every field some skip rule tests, taken at the same moment.
+class Hop {
+  const Hop({
+    required this.from,
+    required this.to,
+    required this.fromValue,
+    required this.firedRuleIds,
+    required this.evaluatedRuleIds,
+    required this.gating,
+    required this.fellThrough,
+  });
+
+  /// The start of the form, before any question is displayed.
+  static const String start = '<start>';
+
+  /// Past the last question: the interview is over.
+  static const String end = '<end>';
+
+  final String from;
+  final String to;
+  final Object? fromValue;
+  final List<String> firedRuleIds;
+  final List<String> evaluatedRuleIds;
+  final Map<String, Object?> gating;
+
+  /// True when [from] carries postskips and none of them fired.
+  final bool fellThrough;
+}
 
 /// What one simulated interview did and left behind.
 class FormRun {
@@ -28,6 +65,9 @@ class FormRun {
     required this.storedRow,
     required this.visitedFields,
     required this.route,
+    required this.hops,
+    required this.postskipFallThroughs,
+    required this.logicTallies,
     required this.decisions,
     required this.uniqueId,
     required this.blockedBy,
@@ -38,6 +78,17 @@ class FormRun {
   });
 
   final String tableName;
+
+  /// Every forward navigation, in order. Retreats and backtracks are not
+  /// hops: they undo a display rather than produce one.
+  final List<Hop> hops;
+
+  /// Question -> how many times its postskips were all evaluated false and
+  /// the interview carried on to the next question in sequence.
+  final Map<String, int> postskipFallThroughs;
+
+  /// Logic check id -> what happened when this interview reached it.
+  final Map<String, LogicTally> logicTallies;
 
   /// The live answer map at the moment of saving.
   final Map<String, dynamic> answers;
@@ -214,14 +265,62 @@ class FormRunner {
         ruleIds[q.postSkips[i]] = skipRuleId(tableName, q, 'postskip', i);
       }
     }
+    final topology = SkipTopology.of(tableName, questions);
+    respondent.enterForm(tableName);
+
+    // What the engine reported during the navigation call in progress. Reset
+    // before each hop, read into the `Hop` after it.
+    final firedThisHop = <String>[];
+    final evaluatedThisHop = <String>[];
+    final hops = <Hop>[];
+    final fallThroughs = <String, int>{};
+    final logicTallies = <String, LogicTally>{};
+    final fieldNames = {for (final q in questions) q.fieldName};
 
     final observer = onSkipEvaluated;
-    final SkipObserver? watch = observer == null
-        ? null
-        : (skip, fired) {
-            final id = ruleIds[skip];
-            if (id != null) observer(id, fired);
-          };
+    void watch(SkipCondition skip, bool fired) {
+      final id = ruleIds[skip];
+      if (id == null) return;
+      evaluatedThisHop.add(id);
+      if (fired) firedThisHop.add(id);
+      observer?.call(id, fired);
+    }
+
+    Map<String, Object?> gatingSnapshot() => {
+          for (final g in topology.gatingFields) g: answers[g],
+        };
+
+    void recordHop(String from, Object? fromValue, int nextIndex, Question? fromQuestion) {
+      final to = nextIndex < 0 ||
+              nextIndex >= questions.length ||
+              questions[nextIndex].fieldName == SurveyLoader.endOfQuestionsField
+          ? Hop.end
+          : questions[nextIndex].fieldName;
+      var fellThrough = false;
+      if (fromQuestion != null && fromQuestion.postSkips.isNotEmpty) {
+        final owned = topology.rulesOwnedBy[fromQuestion.fieldName] ?? const [];
+        fellThrough = !firedThisHop.any(
+          (id) => owned.any((r) => !r.isPreskip && r.id == id),
+        );
+        if (fellThrough) {
+          fallThroughs.update(fromQuestion.fieldName, (v) => v + 1,
+              ifAbsent: () => 1);
+        }
+      }
+      hops.add(
+        Hop(
+          from: from,
+          to: to,
+          fromValue: fromValue,
+          firedRuleIds: List.of(firedThisHop),
+          evaluatedRuleIds: List.of(evaluatedThisHop),
+          gating: gatingSnapshot(),
+          fellThrough: fellThrough,
+        ),
+      );
+      firedThisHop.clear();
+      evaluatedThisHop.clear();
+    }
 
     Future<void> processAutomatic(Question q) async {
       await AutomaticFieldService.compute(
@@ -244,6 +343,7 @@ class FormRunner {
       primaryKeyFields: primaryKeyFields,
       onSkipEvaluated: watch,
     );
+    recordHop(Hop.start, null, index, null);
 
     final history = <int>[];
     // A form cannot legitimately take more steps than it has questions plus
@@ -263,7 +363,14 @@ class FormRunner {
       await _simulateDisplay(question, answers, visited, csv);
 
       final options = await _resolveOptions(question, answers, csv);
-      if (_needsOptions(question) && options.isEmpty) {
+      final emptyList = _needsOptions(question) && options.isEmpty;
+      // A list that is empty *because of earlier answers* -- a filter on
+      // another field matched nothing -- is not a defect in the list. In the
+      // field (PRISM's `sleptunder`: "who slept under this net", drawn from
+      // the household members not yet named) it means an earlier answer was
+      // wrong, and the interviewer goes back and changes it. Only a list
+      // that is empty regardless of the answers is reported as unanswerable.
+      if (emptyList && !_dependsOnAnswers(question)) {
         unanswerable.add(question.fieldName);
       }
 
@@ -288,13 +395,14 @@ class FormRunner {
       var advanced = question.type == QuestionType.information;
       String? lastBlock;
 
-      for (var attempt = 0; !advanced && attempt < attempts; attempt++) {
+      for (var attempt = 0; !advanced && !emptyList && attempt < attempts; attempt++) {
         final value = attempt < safeFrom
             ? respondent.answerFor(
                 question,
                 options: options,
                 rulesTestingThis:
                     rulesByTestedField[question.fieldName] ?? const [],
+                answers: answers,
               )
             : respondent.satisfyingAnswerFor(
                 question,
@@ -338,6 +446,32 @@ class FormRunner {
         blocked.add('${question.fieldName}: $lastBlock');
       }
 
+      // What each logic check saw, once per display, on the answers the
+      // interviewer left. The engine evaluates on every keystroke; counting
+      // each of those would weight a question by how often it was retried.
+      for (var i = 0; i < question.logicChecks.length; i++) {
+        final check = question.logicChecks[i];
+        final id = LogicTally.idFor(tableName, question.fieldName, i, check.condition);
+        final tally = logicTallies[id] ??= LogicTally();
+        tally.evaluated++;
+        final probe = Question(
+          type: question.type,
+          fieldName: question.fieldName,
+          fieldType: question.fieldType,
+          logicChecks: [check],
+        );
+        if (LogicService.evaluateLogicChecks(probe, answers) != null) tally.fired++;
+        final blank = LogicTally.identifiersIn(check.condition).where(
+          (f) => f != question.fieldName && fieldNames.contains(f) && answers[f] == null,
+        );
+        if (blank.isNotEmpty) {
+          tally.nullOperand++;
+          for (final f in blank) {
+            tally.nullFields.update(f, (v) => v + 1, ifAbsent: () => 1);
+          }
+        }
+      }
+
       if (!advanced) {
         // A gate can close for two quite different reasons, and calling both
         // a dead end would bury the one that matters.
@@ -351,12 +485,23 @@ class FormRunner {
         // and changes the earlier answer. So does this.
         const maxRetreats = 3;
         final taken = retreats[question.fieldName] ?? 0;
+        final routeClosed = (emptyList && _dependsOnAnswers(question)) ||
+            _blockedByAnotherField(question, questions, answers);
         if (history.isNotEmpty && taken < maxRetreats) {
           retreats[question.fieldName] = taken + 1;
           index = history.removeLast();
+          // Going back to give the same answer again would arrive here again.
+          // An interviewer changes the earlier answer; so does this. Each
+          // time is counted: a question every interview has to back out of
+          // is worth a designer's eye even when everyone gets through.
+          if (routeClosed) {
+            deadEndRoutes.add(question.fieldName);
+            final previous = questions[index].fieldName;
+            respondent.avoid(previous, answers[previous]);
+          }
           continue;
         }
-        if (_blockedByAnotherField(question, questions, answers)) {
+        if (routeClosed) {
           deadEndRoutes.add(question.fieldName);
         } else {
           cannotAdvance.add(question.fieldName);
@@ -370,6 +515,8 @@ class FormRunner {
 
       if (question.type != QuestionType.automatic) history.add(index);
 
+      firedThisHop.clear();
+      evaluatedThisHop.clear();
       final next = await SurveyNavigationService.advanceFromQuestion(
         questions: questions,
         currentIndex: index,
@@ -378,8 +525,14 @@ class FormRunner {
         primaryKeyFields: primaryKeyFields,
         onSkipEvaluated: watch,
       );
-
       // Parked on the last question means the walk ran off the end.
+      recordHop(
+        question.fieldName,
+        answers[question.fieldName],
+        next == index ? questions.length : next,
+        question,
+      );
+
       if (next == index) break;
       index = next;
     }
@@ -411,6 +564,9 @@ class FormRunner {
       storedRow: storedRow,
       visitedFields: visited,
       route: route,
+      hops: hops,
+      postskipFallThroughs: fallThroughs,
+      logicTallies: logicTallies,
       decisions: List.of(respondent.decisions),
       uniqueId: storedRow['uniqueid']?.toString(),
       blockedBy: blocked,
@@ -494,9 +650,7 @@ class FormRunner {
     final rule = kind == 'preskip'
         ? owner.preSkips[order]
         : owner.postSkips[order];
-    return '$table.${owner.fieldName}.$kind[$order] '
-        '${rule.fieldName} ${rule.condition} ${rule.response} '
-        '-> ${rule.skipToFieldName}';
+    return RuleRef.idFor(table, owner.fieldName, kind, order, rule);
   }
 
   /// Reproduces what happens because a question is rendered.
@@ -529,6 +683,14 @@ class FormRunner {
     if (question.calculation != null) {
       await AutoFields.compute(answers, question, surveyId: surveyId);
     }
+  }
+
+  /// Whether the question's list is filtered on other answers, so that an
+  /// empty list can be the route's fault rather than the list's.
+  bool _dependsOnAnswers(Question question) {
+    final config = question.responseConfig;
+    if (config == null) return false;
+    return config.filters.any((f) => f.value.contains('[['));
   }
 
   bool _needsOptions(Question question) =>

@@ -1,38 +1,44 @@
 <?xml version = '1.0' encoding = 'utf-8'?>
 <!--
-  A form with a question no answer can get past.
-
-  `age` declares a range of 0..99 and a logic check on `age >= 0`. A logic
-  check fails when its condition is TRUE, so every value the range permits
-  trips it: the app's Next button is dead and the interviewer can neither
-  move on nor finish. Hand-written rather than generated, because no data
-  dictionary the generator accepts would produce it -- which is the point,
-  since this is what the runner's own gate has to detect.
+  One household member. `hhid` arrives from the parent; `linenum` is the
+  sibling ordinal the engine assigns.
 -->
 <survey>
 
 	<question type = 'automatic' fieldname = 'starttime' fieldtype = 'datetime'>
 	</question>
 
-	<question type = 'automatic' fieldname = 'code' fieldtype = 'text'>
+	<question type = 'automatic' fieldname = 'hhid' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'linenum' fieldtype = 'integer'>
+	</question>
+
+	<question type = 'text' fieldname = 'name' fieldtype = 'text'>
+		<text>name</text>
+		<maxCharacters>20</maxCharacters>
+	</question>
+
+	<question type = 'radio' fieldname = 'sex' fieldtype = 'integer'>
+		<text>sex</text>
+		<responses>
+			<response value = '1'>Option 1</response>
+			<response value = '2'>Option 2</response>
+		</responses>
 	</question>
 
 	<question type = 'text' fieldname = 'age' fieldtype = 'text_integer'>
-		<text>Age in completed years</text>
+		<text>age</text>
 		<maxCharacters>3</maxCharacters>
 		<numeric_check>
 			<values minvalue ='0' maxvalue='99' other_values = '0' message = 'Number must be between 0 and 99!'></values>
 		</numeric_check>
-		<logic_check message='This question can never be satisfied'>age &gt;= 0</logic_check>
-	</question>
-
-	<question type = 'text' fieldname = 'comments' fieldtype = 'text'>
-		<text>Comments</text>
-		<maxCharacters>100</maxCharacters>
-		<optional></optional>
 	</question>
 
 	<question type = 'automatic' fieldname = 'uniqueid' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'parent_uniqueid' fieldtype = 'text'>
 	</question>
 
 	<question type = 'automatic' fieldname = 'swver' fieldtype = 'text'>

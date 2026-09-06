@@ -1,20 +1,20 @@
 {
-  "surveyName": "Trap Logic",
-  "surveyId": "trap_logic",
-  "databaseName": "trap_logic.sqlite",
+  "surveyName": "Deep Gate",
+  "surveyId": "deep_gate",
+  "databaseName": "deep_gate.sqlite",
   "xmlFiles": [
-    "trap.xml"
+    "gate.xml"
   ],
   "crfs": [
     {
       "display_order": 10,
-      "tablename": "trap",
-      "displayname": "Trap",
+      "tablename": "gate",
+      "displayname": "Gate",
       "isbase": 1,
       "primarykey": "code",
       "display_fields": "code",
       "idconfig": {
-        "prefix": "T",
+        "prefix": "G",
         "fields": [],
         "incrementLength": 4
       }

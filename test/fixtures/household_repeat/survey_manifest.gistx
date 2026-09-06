@@ -1,0 +1,63 @@
+{
+  "surveyName": "Household Repeat",
+  "surveyId": "household_repeat",
+  "databaseName": "household_repeat.sqlite",
+  "xmlFiles": [
+    "hh.xml",
+    "member.xml",
+    "followup.xml"
+  ],
+  "crfs": [
+    {
+      "display_order": 10,
+      "tablename": "hh",
+      "displayname": "Household",
+      "isbase": 1,
+      "primarykey": "hhid",
+      "linkingfield": "hhid",
+      "idconfig": {
+        "prefix": "",
+        "fields": [
+          {
+            "name": "district",
+            "length": 1
+          },
+          {
+            "name": "hhnum",
+            "length": 3
+          }
+        ],
+        "incrementLength": 0
+      },
+      "display_fields": "hhid"
+    },
+    {
+      "display_order": 20,
+      "tablename": "member",
+      "displayname": "Member",
+      "isbase": 0,
+      "primarykey": "hhid,linenum",
+      "linkingfield": "hhid",
+      "parenttable": "hh",
+      "incrementfield": "linenum",
+      "requireslink": 1,
+      "repeat_count_field": "n_members",
+      "auto_start_repeat": 2,
+      "repeat_enforce_count": 3,
+      "display_fields": "hhid,name",
+      "entry_condition": "enrolled=1"
+    },
+    {
+      "display_order": 30,
+      "tablename": "followup",
+      "displayname": "Follow-up",
+      "isbase": 0,
+      "primarykey": "hhid",
+      "linkingfield": "hhid",
+      "parenttable": "hh",
+      "requireslink": 1,
+      "display_fields": "hhid",
+      "entry_condition": "enrolled=1"
+    }
+  ]
+}

@@ -14,10 +14,16 @@ class Scenario {
     required this.children,
     required this.repeats,
     required this.livelocked,
+    this.oneOffs = const [],
   });
 
   final FormRun parent;
   final List<FormRun> children;
+
+  /// One entry per child form the interviewer opens by hand -- a follow-up
+  /// with a parent and an entry condition but no repeat loop -- saying
+  /// whether this parent qualified and, if so, whether the child was done.
+  final List<OneOffOutcome> oneOffs;
 
   /// One entry per repeating child form the parent triggered.
   final List<RepeatOutcome> repeats;
@@ -64,6 +70,52 @@ class RepeatOutcome {
   /// For `askToUpdate`, which button the simulated interviewer pressed.
   /// Null when that question never arose.
   final bool? acceptedUpdate;
+}
+
+/// What a manually-entered child form did for one parent.
+class OneOffOutcome {
+  const OneOffOutcome({
+    required this.childTable,
+    required this.entryCondition,
+    required this.qualified,
+    required this.entered,
+  });
+
+  final String childTable;
+  final String entryCondition;
+
+  /// Whether the parent met the entry condition (always true when there is
+  /// none).
+  final bool qualified;
+
+  /// Whether the child interview was run and saved.
+  final bool entered;
+}
+
+/// Whether [crf] is a child the interviewer opens by hand rather than one
+/// the repeat loop opens: it has a parent and no repeat configuration. The
+/// same three conditions `RepeatPlanService.plan` uses to *include* a form,
+/// negated.
+bool isOneOffChild(Map<String, dynamic> crf) {
+  final parent = crf['parenttable']?.toString() ?? '';
+  if (parent.isEmpty) return false;
+  final countField = crf['repeat_count_field']?.toString() ?? '';
+  final autoStart = int.tryParse('${crf['auto_start_repeat'] ?? 0}') ?? 0;
+  return countField.isEmpty || autoStart <= 0;
+}
+
+/// The app's reading of `entry_condition`: `field=value`, compared as text
+/// against the parent's saved record (`ParentIdSelectorScreen`). No
+/// condition means every parent qualifies.
+bool meetsEntryCondition(Map<String, dynamic> crf, Map<String, dynamic> parentRow) {
+  final condition = crf['entry_condition']?.toString() ?? '';
+  if (!condition.contains('=')) return true;
+  final parts = condition.split('=');
+  if (parts.length != 2) return true;
+  final field = parts[0].trim().toLowerCase();
+  final wanted = parts[1].trim();
+  final lower = {for (final e in parentRow.entries) e.key.toLowerCase(): e.value};
+  return lower[field]?.toString() == wanted;
 }
 
 /// Runs a parent form and then whatever repeats follow it.
@@ -130,6 +182,49 @@ class ScenarioRunner {
       parentTableName: parentTable,
       answers: parent.answers,
     );
+
+    // Children the interviewer opens by hand. In the field the parent is
+    // picked from a list filtered by `entry_condition`; here every parent
+    // that qualifies gets its follow-up done once, which is the survey
+    // working as intended. The linking value and parent_uniqueid arrive the
+    // same way the selector screen hands them over.
+    final oneOffs = <OneOffOutcome>[];
+    for (final crf in crfs) {
+      if (crf['parenttable']?.toString() != parentTable) continue;
+      if (!isOneOffChild(crf)) continue;
+      final childTable = crf['tablename'].toString();
+      final linkingField = crf['linkingfield']?.toString() ?? '';
+      final linkingValue = parent.storedRow[linkingField];
+      final qualified = meetsEntryCondition(crf, parent.storedRow) &&
+          linkingField.isNotEmpty &&
+          linkingValue != null &&
+          '$linkingValue'.isNotEmpty;
+      var entered = false;
+      if (qualified) {
+        final run = await FormRunner(
+          surveyId: surveyId,
+          tableName: childTable,
+          respondent: respondent,
+          onSkipEvaluated: onSkipEvaluated,
+        ).run(
+          prepopulatedAnswers: {
+            linkingField: linkingValue,
+            AutoFields.parentUniqueIdField: parent.uniqueId,
+          },
+          crf: crf,
+        );
+        children.add(run);
+        entered = run.saved;
+      }
+      oneOffs.add(
+        OneOffOutcome(
+          childTable: childTable,
+          entryCondition: crf['entry_condition']?.toString() ?? '',
+          qualified: qualified,
+          entered: entered,
+        ),
+      );
+    }
 
     for (final plan in plans) {
       final enforceMode = RepeatCountService.parseEnforceMode(
@@ -244,6 +339,7 @@ class ScenarioRunner {
       children: children,
       repeats: repeats,
       livelocked: livelocked,
+      oneOffs: oneOffs,
     );
   }
 }

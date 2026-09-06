@@ -1,20 +1,20 @@
 {
-  "surveyName": "Trap Logic",
-  "surveyId": "trap_logic",
-  "databaseName": "trap_logic.sqlite",
+  "surveyName": "Logic Malformed",
+  "surveyId": "logic_malformed",
+  "databaseName": "logic_malformed.sqlite",
   "xmlFiles": [
-    "trap.xml"
+    "form.xml"
   ],
   "crfs": [
     {
       "display_order": 10,
-      "tablename": "trap",
-      "displayname": "Trap",
+      "tablename": "form",
+      "displayname": "form",
       "isbase": 1,
       "primarykey": "code",
       "display_fields": "code",
       "idconfig": {
-        "prefix": "T",
+        "prefix": "F",
         "fields": [],
         "incrementLength": 4
       }
