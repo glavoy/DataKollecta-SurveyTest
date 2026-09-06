@@ -157,7 +157,19 @@ class PackageInstaller {
     // though the setting is called `active_survey`.
     await SettingsService().setActiveSurvey(surveyName);
 
-    await DbService.init();
+    // A package can be refused here rather than merely fail to work: the app
+    // validates every table and column name a dictionary supplies as it reads
+    // the package, and throws on one it cannot use. That is a design finding
+    // in everything but name, so it has to arrive as an InstallException with
+    // the package named -- a bare DatabaseException surfacing from a repo the
+    // designer has never heard of is the opposite of what this tool is for.
+    try {
+      await DbService.init();
+    } on Exception catch (e) {
+      throw InstallException(
+        '${p.basename(zipFile.path)} could not be installed: $e',
+      );
+    }
 
     final resolved = await SurveyConfigService().getActiveSurveyId();
     if (resolved != surveyId) {
