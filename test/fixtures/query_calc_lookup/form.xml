@@ -1,0 +1,52 @@
+<?xml version = '1.0' encoding = 'utf-8'?>
+<!--
+  A valid <calculation type='query'> selecting from a CSV-imported lookup
+  table, with a <parameter> bound to an earlier answer. This is the positive
+  counterpart to query_calc_sql: the query is a single, comment-free SELECT,
+  so it is not refused at install, and it really does hit db.rawQuery during
+  a run -- the run must assert on the looked-up value, since a failed query
+  is swallowed and returns '' rather than raising.
+-->
+<survey>
+
+	<question type = 'automatic' fieldname = 'starttime' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'code' fieldtype = 'text'>
+	</question>
+
+	<question type = 'radio' fieldname = 'lookup_code' fieldtype = 'text'>
+		<text>lookup_code</text>
+		<responses>
+			<response value = 'A1'>Alpha</response>
+			<response value = 'A2'>Beta</response>
+		</responses>
+	</question>
+
+	<question type = 'automatic' fieldname = 'looked_up_name' fieldtype = 'text'>
+		<calculation type = 'query'>
+			<sql>SELECT name FROM lookup WHERE code = @lookup_code</sql>
+			<parameter name = '@lookup_code' field = 'lookup_code'/>
+		</calculation>
+	</question>
+
+	<question type = 'automatic' fieldname = 'uniqueid' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'swver' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'survey_id' fieldtype = 'text'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'lastmod' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'automatic' fieldname = 'stoptime' fieldtype = 'datetime'>
+	</question>
+
+	<question type = 'information' fieldname = 'end_of_questions' fieldtype = 'n/a'>
+		<text>Press the 'Finish' button to save the data.</text >
+	</question>
+
+</survey>

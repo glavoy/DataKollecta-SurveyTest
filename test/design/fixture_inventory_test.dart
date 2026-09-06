@@ -23,6 +23,7 @@ void main() {
     'trap_logic': {},
     'deep_gate': {},
     'household_repeat': {},
+    'query_calc_lookup': {},
     'logic_inert': {},
     'info_fallthrough': {'skip_domain_gap'},
     'dk_fallthrough': {'skip_domain_gap'},
@@ -105,7 +106,13 @@ void main() {
   }
 
   test('the engine stays clean on every fixture a run can save', () async {
-    for (final name in ['deep_gate', 'household_repeat', 'dk_fallthrough', 'csv_cascade_empty']) {
+    for (final name in [
+      'deep_gate',
+      'household_repeat',
+      'dk_fallthrough',
+      'csv_cascade_empty',
+      'query_calc_lookup',
+    ]) {
       final report = await runFixture(name, root, runs: 6);
       expect(
         report.engineFindings.where((f) => f.code != 'save_failed').map((f) => '$name ${f.where} ${f.code}'),

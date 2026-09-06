@@ -105,4 +105,44 @@ void main() {
         reason: 'the idconfig exists to build hhid; -9 is the failure value');
     expect(run.storedRow['hhid'], matches(RegExp(r'^\d{4}$')));
   });
+
+  group('a valid query calculation', () {
+    late Directory queryRoot;
+    late InstalledPackage queryPkg;
+
+    setUp(() async {
+      queryRoot = await Directory.systemTemp.createTemp('surveytest_run');
+      await Sandbox.install(queryRoot);
+      queryPkg = await installFixture('query_calc_lookup', queryRoot);
+    });
+
+    tearDown(() async {
+      if (await queryRoot.exists()) await queryRoot.delete(recursive: true);
+    });
+
+    test('still computes, rather than swallowing a failed lookup as \'\'',
+        () async {
+      final run = await FormRunner(
+        surveyId: queryPkg.surveyId,
+        tableName: 'form',
+        respondent: VirtualRespondent(
+          seed: 1,
+          strategy: RespondentStrategy.firstOption,
+        ),
+      ).run();
+
+      expect(run.saveError, isNull, reason: 'the interview did not save');
+      expect(run.storedRow['lookup_code'], 'A1',
+          reason: 'firstOption is expected to pick the first response');
+      expect(run.storedRow['looked_up_name'], 'Alpha',
+          reason: 'AutoFields swallows a failed query and returns \'\'; '
+              'a run that merely completes proves nothing');
+
+      final db = await DbService.getDatabaseForQueries(queryPkg.surveyId);
+      final rows = await db.query('form');
+      expect(rows.length, 1);
+      expect(rows.single['looked_up_name'], 'Alpha',
+          reason: 'the saved row must carry the looked-up value');
+    });
+  });
 }

@@ -20,3 +20,4 @@ fixture to the row below.
 | `skip_dropped` | `skip_dropped_by_parser` | a `<skip>` with no fieldname |
 | `query_calc_sql` | refused at install | a `<calculation type='query'>` carrying a second statement -- the app runs query calculations on the survey's own read/write connection, so it must be one SELECT |
 | `household_repeat` | none (clean) | a parent with a generated id, a repeating child, and a follow-up entered by hand when `enrolled=1`; the engine self-tests run on it |
+| `query_calc_lookup` | none (clean) | a valid `<calculation type='query'>` selecting from a CSV-imported lookup table, with a bound `<parameter>`; the saved row must carry the looked-up value, not `''` |
